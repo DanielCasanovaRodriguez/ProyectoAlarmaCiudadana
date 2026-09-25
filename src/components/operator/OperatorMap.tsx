@@ -1,3 +1,4 @@
+import L from 'leaflet';
 import React, { useEffect, useRef } from 'react';
 import type { Incident } from './types';
 import { STATUS_LABELS, SEVERITY_COLORS } from './types';
@@ -86,16 +87,6 @@ export function OperatorMap({ incidents, selectedId, onSelectIncident }: Operato
 
   // ── Inicializar mapa ──────────────────────────────────────────
   useEffect(() => {
-    if (!document.getElementById('leaflet-css-op')) {
-      const link = document.createElement('link');
-      link.id          = 'leaflet-css-op';
-      link.rel         = 'stylesheet';
-      link.href        = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-      link.integrity   = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=';
-      link.crossOrigin = '';
-      document.head.appendChild(link);
-    }
-
     if (!document.getElementById('op-map-styles')) {
       const style = document.createElement('style');
       style.id = 'op-map-styles';
@@ -112,7 +103,6 @@ export function OperatorMap({ incidents, selectedId, onSelectIncident }: Operato
 
     function init() {
       if (!mapRef.current || mapInstanceRef.current) return;
-      const L = window.L;
 
       const map = L.map(mapRef.current, {
         center:             KENNEDY_CENTER,
@@ -129,16 +119,7 @@ export function OperatorMap({ incidents, selectedId, onSelectIncident }: Operato
       mapInstanceRef.current = map;
     }
 
-    if (!window.L) {
-      const script = document.createElement('script');
-      script.src         = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-      script.integrity   = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
-      script.crossOrigin = '';
-      script.onload      = init;
-      document.head.appendChild(script);
-    } else {
-      init();
-    }
+    init();
 
     return () => {
       markersRef.current.forEach(m => m.remove());
@@ -148,8 +129,7 @@ export function OperatorMap({ incidents, selectedId, onSelectIncident }: Operato
 
   // ── Sincronizar marcadores cuando cambian incidents o selectedId ─
   useEffect(() => {
-    if (!mapInstanceRef.current || !window.L) return;
-    const L   = window.L;
+    if (!mapInstanceRef.current) return;
     const map = mapInstanceRef.current;
 
     // IDs de los incidentes actuales

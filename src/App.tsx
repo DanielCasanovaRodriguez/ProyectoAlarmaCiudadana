@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { WelcomeScreen } from './components/screens/WelcomeScreen';
 import { OnboardingScreen } from './components/screens/OnboardingScreen';
 import { LocationPermissionScreen } from './components/screens/LocationPermissionScreen';
@@ -34,6 +34,7 @@ import {
 } from './services/alertService.ts';
 import { completeRegistration, sendPasswordResetOTP } from './services/authService.ts';
 import { uploadMultipleFiles } from './services/mediaService';
+import { getCurrentLocation, initNativeShell } from './platform';
 import { supabase } from './utils/supabase/client';
 
 // ================================================================
@@ -222,6 +223,44 @@ export default function App() {
     };
   }, [appState.auth.isLoggedIn, appState.currentScreen]);
 
+  // ── Historial de pantallas (botón atrás de Android) ─────────────
+  // Pantallas raíz: "atrás" minimiza la app. Pantallas transitorias
+  // (verificaciones, confirmación): no se vuelve a ellas con "atrás".
+  const ROOT_SCREENS: Screen[] = ['welcome', 'auth-welcome', 'main-map', 'operator-dashboard', 'admin-panel'];
+  const TRANSIENT_SCREENS: Screen[] = ['email-verification', 'otp-verification', 'reset-password', 'alert-confirmation', 'location-permission'];
+  const historyRef   = useRef<Screen[]>([]);
+  const prevScreen   = useRef<Screen>(appState.currentScreen);
+  const goingBackRef = useRef(false);
+
+  useEffect(() => {
+    const current = appState.currentScreen;
+    const prev    = prevScreen.current;
+    if (current === prev) return;
+    if (ROOT_SCREENS.includes(current)) {
+      historyRef.current = [];
+    } else if (!goingBackRef.current && !TRANSIENT_SCREENS.includes(prev)) {
+      historyRef.current.push(prev);
+    }
+    goingBackRef.current = false;
+    prevScreen.current   = current;
+  }, [appState.currentScreen]);
+
+  const currentScreenRef = useRef(appState.currentScreen);
+  currentScreenRef.current = appState.currentScreen;
+
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    initNativeShell(() => {
+      if (ROOT_SCREENS.includes(currentScreenRef.current)) return false;
+      const target = historyRef.current.pop()
+        ?? (appState.auth.isLoggedIn ? 'main-map' : 'auth-welcome');
+      goingBackRef.current = true;
+      setAppState(prev => ({ ...prev, currentScreen: target }));
+      return true;
+    }).then(fn => { cleanup = fn; });
+    return () => cleanup?.();
+  }, [appState.auth.isLoggedIn]);
+
   // ── Helpers de navegación y estado ──────────────────────────────
   const navigateToScreen = (screen: Screen) => {
     setAppState(prev => ({ ...prev, currentScreen: screen }));
@@ -240,92 +279,84 @@ export default function App() {
     files:       File[] = []
   ): Promise<void> => {
 
-    if (!appState.userLocation) {
-      toast.error('Ubicación no disponible', {
-        description: 'Activa la ubicación de tu dispositivo para enviar una alerta.',
-      });
-      return;
+    // 1. Ubicación fresca del GPS en el momento del SOS. Si no se puede
+    //    obtener, se usa la última conocida (o la zona elegida manualmente).
+    let location = appState.userLocation;
+    try {
+      const fresh = await getCurrentLocation({ highAccuracy: true, timeoutMs: 8_000, maxAgeMs: 30_000 });
+      location = { lat: fresh.lat, lng: fresh.lng };
+      setAppState(prev => ({ ...prev, userLocation: location }));
+    } catch (err) {
+      console.warn('No se obtuvo ubicación fresca, se usa la última conocida:', err);
     }
 
-    const location = appState.userLocation;
-    const tempId   = `local_${Date.now()}`;
+    if (!location) {
+      // AlarmSheet muestra este error y mantiene el formulario para reintentar
+      throw new Error('Activa la ubicación de tu dispositivo para enviar una alerta.');
+    }
 
-    const alertaLocal: Alert = {
-      id:          tempId,
+    // 2. Guardar en la BD. Solo se confirma al usuario cuando el servidor
+    //    respondió; si falla, el error llega a AlarmSheet para reintentar.
+    const alertaCreada = await createAlertDB({
+      type_code:   type,
+      lat:         location.lat,
+      lng:         location.lng,
+      description: description || undefined,
+      media_urls:  [],
+    });
+
+    const alertaGuardada: Alert = {
+      id:          alertaCreada.id,
       type,
       location,
-      timestamp:   new Date(),
+      timestamp:   new Date(alertaCreada.created_at),
       description: description || undefined,
       mediaUrls:   [],
       status:      'open',
     };
 
-    // Navegar a confirmación inmediatamente (UX fluida)
     setAppState(prev => ({
       ...prev,
-      alerts:           [alertaLocal, ...prev.alerts],
-      areaAlerts:       [alertaLocal, ...prev.areaAlerts],
-      lastCreatedAlert: alertaLocal,
+      alerts:           [alertaGuardada, ...prev.alerts.filter(a => a.id !== alertaGuardada.id)],
+      areaAlerts:       [alertaGuardada, ...prev.areaAlerts.filter(a => a.id !== alertaGuardada.id)],
+      lastCreatedAlert: alertaGuardada,
       currentScreen:    'alert-confirmation',
     }));
 
+    // 3. Evidencias: se suben después de confirmar la alerta, para no
+    //    retrasar el SOS. Un fallo aquí no invalida la alerta.
+    if (files.length === 0) return;
+
     try {
-      const alertaCreada = await createAlertDB({
-        type_code:   type,
-        lat:         location.lat,
-        lng:         location.lng,
-        description: description || undefined,
-        media_urls:  [],
+      toast.info('Subiendo evidencia...', {
+        description: `${files.length} archivo${files.length > 1 ? 's' : ''}`,
       });
 
-      console.log('✅ Alerta creada en BD:', alertaCreada.id);
+      const uploadResult = await uploadMultipleFiles(files, alertaCreada.id);
 
-      let mediaUrls: string[] = [];
-
-      if (files.length > 0) {
-        toast.info('Subiendo evidencia...', {
-          description: `${files.length} archivo${files.length > 1 ? 's' : ''}`,
+      if (uploadResult.urls.length > 0) {
+        const mediaUrls = uploadResult.urls;
+        await updateAlertMediaUrls(alertaCreada.id, mediaUrls);
+        const conEvidencia = { ...alertaGuardada, mediaUrls };
+        setAppState(prev => ({
+          ...prev,
+          lastCreatedAlert: prev.lastCreatedAlert?.id === conEvidencia.id ? conEvidencia : prev.lastCreatedAlert,
+          alerts:     prev.alerts.map(a => a.id === conEvidencia.id ? conEvidencia : a),
+          areaAlerts: prev.areaAlerts.map(a => a.id === conEvidencia.id ? conEvidencia : a),
+        }));
+        toast.success('Evidencia guardada', {
+          description: `${mediaUrls.length} archivo${mediaUrls.length > 1 ? 's' : ''} adjunto${mediaUrls.length > 1 ? 's' : ''}`,
         });
-
-        const uploadResult = await uploadMultipleFiles(files, alertaCreada.id);
-
-        if (uploadResult.urls.length > 0) {
-          mediaUrls = uploadResult.urls;
-          await updateAlertMediaUrls(alertaCreada.id, mediaUrls);
-          console.log('✅ media_urls actualizados:', mediaUrls);
-          toast.success('Evidencia guardada', {
-            description: `${mediaUrls.length} archivo${mediaUrls.length > 1 ? 's' : ''} adjunto${mediaUrls.length > 1 ? 's' : ''}`,
-          });
-        }
-
-        if (uploadResult.errors.length > 0) {
-          toast.warning('Algunos archivos no se pudieron subir', {
-            description: uploadResult.errors.join(', '),
-          });
-        }
       }
 
-      const alertaFinal: Alert = {
-        id:          alertaCreada.id,
-        type,
-        location,
-        timestamp:   new Date(alertaCreada.created_at),
-        description: description || undefined,
-        mediaUrls,
-        status:      'open',
-      };
-
-      // Reemplazar el ID temporal en ambas listas
-      setAppState(prev => ({
-        ...prev,
-        lastCreatedAlert: alertaFinal,
-        alerts:     prev.alerts.map(a => a.id === tempId ? alertaFinal : a),
-        areaAlerts: prev.areaAlerts.map(a => a.id === tempId ? alertaFinal : a),
-      }));
-
+      if (uploadResult.errors.length > 0) {
+        toast.warning('Algunos archivos no se pudieron subir', {
+          description: uploadResult.errors.join(', '),
+        });
+      }
     } catch (error: any) {
-      console.error('❌ Error creando alerta:', error);
-      toast.error('Alerta mostrada localmente, pero falló al guardar en la base de datos', {
+      console.error('Error subiendo evidencias:', error);
+      toast.warning('La alerta se envió, pero la evidencia no se pudo adjuntar', {
         description: error.message,
       });
     }
