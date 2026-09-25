@@ -110,22 +110,9 @@ export function ForgotPasswordScreen({ onBack, onCodeSent }: ForgotPasswordScree
       if (result.success) {
         console.log('✅ Código enviado exitosamente');
         
-        // Mostrar código en desarrollo si está disponible
-        if (result.devCode) {
-          console.log('━'.repeat(60));
-          console.log('🔧 MODO DESARROLLO');
-          console.log('📧 Email:', email);
-          console.log('🔑 Código:', result.devCode);
-          console.log('━'.repeat(60));
-          
-          toast.success('Código enviado (Modo Desarrollo)', {
-            description: `Código: ${result.devCode} - También visible en consola (F12)`
-          });
-        } else {
-          toast.success('Código enviado', {
-            description: 'Revisa tu correo electrónico (incluye carpeta de spam)'
-          });
-        }
+        toast.success('Código enviado', {
+          description: 'Revisa tu correo electrónico (incluye carpeta de spam)'
+        });
         
         setCooldownRemaining(COOLDOWN_SECONDS);
         onCodeSent(email);

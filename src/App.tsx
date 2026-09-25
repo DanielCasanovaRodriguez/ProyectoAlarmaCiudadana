@@ -452,15 +452,7 @@ export default function App() {
             onLogin={handleLogin}
             onNavigateToRegister={() => navigateToScreen('register')}
             onNavigateToForgotPassword={() => navigateToScreen('forgot-password')}
-            onNavigateToCollaboratorPanel={(role: string) => {
-              if (role === 'admin') {
-                navigateToScreen('admin-panel');
-              } else if (role === 'operator' || role === 'auditor') {
-                navigateToScreen('operator-dashboard');
-              } else {
-                navigateToScreen('auth-welcome');
-              }
-            }}
+            onNavigateToCollaboratorPanel={() => navigateToScreen('operator-login')}
           />
         );
 

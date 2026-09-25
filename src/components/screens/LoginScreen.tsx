@@ -2,17 +2,16 @@ import React, { useState } from 'react';
 import { ArrowLeft, AlertCircle } from 'lucide-react';
 import { Button } from '../ui/button';
 import { AuthInput } from '../auth/AuthInput';
-import { signIn } from '../../services/authService';
+import { signIn, cerrarSesion } from '../../services/authService';
 import { getCurrentUserProfile } from '../../services/adminService';
 import { toast } from 'sonner';
-import { TwoFactorVerificationScreen } from './TwoFactorVerificationScreen';
 
 interface LoginScreenProps {
   onBack: () => void;
   onLogin: (email: string, password: string, userName: string) => void;
   onNavigateToRegister: () => void;
   onNavigateToForgotPassword: () => void;
-  onNavigateToCollaboratorPanel?: (role: string, accessToken: string, user: any, profile: any) => void;
+  onNavigateToCollaboratorPanel?: (role: string) => void;
 }
 
 export function LoginScreen({
@@ -27,13 +26,6 @@ export function LoginScreen({
   const [errors, setErrors] = useState<{ email?: string; password?: string; general?: string }>({});
   const [isLoading, setIsLoading] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
-  const [show2FA, setShow2FA] = useState(false);
-  const [pendingAuth, setPendingAuth] = useState<{
-    role: string;
-    accessToken: string;
-    user: any;
-    profile: any;
-  } | null>(null);
 
   const isEmailValid = (email: string) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -41,30 +33,6 @@ export function LoginScreen({
   };
 
   const canSubmit = email.length > 0 && password.length > 0;
-
-  const handle2FAComplete = () => {
-    if (pendingAuth && onNavigateToCollaboratorPanel) {
-      toast.success(`Bienvenido, ${pendingAuth.profile.name || email}`);
-
-      // Save to localStorage
-      localStorage.setItem('admin_user', JSON.stringify(pendingAuth.user));
-      localStorage.setItem('admin_profile', JSON.stringify(pendingAuth.profile));
-      localStorage.setItem('admin_access_token', pendingAuth.accessToken);
-
-      // Redirect based on role
-      onNavigateToCollaboratorPanel(
-        pendingAuth.role,
-        pendingAuth.accessToken,
-        pendingAuth.user,
-        pendingAuth.profile
-      );
-    }
-  };
-
-  const handle2FABack = () => {
-    setShow2FA(false);
-    setPendingAuth(null);
-  };
 
   const handleSubmit = async () => {
     setErrors({});
@@ -130,15 +98,14 @@ export function LoginScreen({
               if (['admin', 'operator', 'auditor'].includes(userRole)) {
                 console.log('✅ Collaborator detected, showing 2FA verification...');
                 
-                // Store pending auth data and show 2FA screen
-                setPendingAuth({
-                  role: userRole,
-                  accessToken,
-                  user,
-                  profile,
+                // Los colaboradores deben entrar por el acceso de colaboradores,
+                // que exige el segundo factor real (OTP de Supabase por correo).
+                await cerrarSesion();
+                toast.info('Acceso de colaborador', {
+                  description: 'Ingresa por "Acceso colaboradores" para completar la verificación de seguridad.',
                 });
-                setShow2FA(true);
                 setIsLoading(false);
+                onNavigateToCollaboratorPanel(userRole);
                 return;
               }
             }
@@ -158,17 +125,6 @@ export function LoginScreen({
       setIsLoading(false);
     }
   };
-
-  // Show 2FA screen if needed
-  if (show2FA && pendingAuth) {
-    return (
-      <TwoFactorVerificationScreen
-        email={email}
-        onBack={handle2FABack}
-        onVerificationComplete={handle2FAComplete}
-      />
-    );
-  }
 
   return (
     <div className="h-full bg-white flex flex-col">

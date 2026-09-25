@@ -3,7 +3,7 @@ import { Shield, Mail, Lock, Eye, EyeOff, Loader2, ArrowLeft } from 'lucide-reac
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
-import { iniciarSesionColaborador } from '../../services/authService';
+import { iniciarSesionColaborador, cerrarSesion } from '../../services/authService';
 import { getCurrentUserProfile } from '../../services/adminService';
 import { toast } from 'sonner';
 import { EmailVerificationScreen } from './EmailVerificationScreen';
@@ -30,7 +30,6 @@ export function CollaboratorLoginScreen({ onBack, onLoginSuccess }: Collaborator
   const [showPassword,           setShowPassword]           = useState(false);
   const [loading,                setLoading]                = useState(false);
   const [showEmailVerification,  setShowEmailVerification]  = useState(false);
-  const [localVerificationCode,  setLocalVerificationCode]  = useState<string | undefined>(undefined);
   const [pendingAuth,            setPendingAuth]            = useState<{
     role:        string;
     accessToken: string;
@@ -84,19 +83,19 @@ export function CollaboratorLoginScreen({ onBack, onLoginSuccess }: Collaborator
 
       console.log('✅ Perfil obtenido:', profile);
 
-      // ── PASO 3: Enviar OTP de 2FA ─────────────────────────────────
-      // sendLoginOTP usa supabase.auth.signInWithOtp con shouldCreateUser:false.
-      // Si Supabase tiene rate limit, genera un código local y lo retorna.
-      const otpResult = await sendLoginOTP(email);
+      // ── PASO 3: Segundo factor ────────────────────────────────────
+      // La contraseña ya fue validada. Se cierra esa sesión para que el
+      // acceso solo exista después de verificar el código enviado por
+      // Supabase al correo (verifyOtp crea la sesión definitiva).
+      await cerrarSesion();
 
-      // ⚠️ CRÍTICO: guardar el código local ANTES de mostrar la pantalla 2FA.
-      // Sin esto el campo localVerificationCode queda undefined y el fallback
-      // local nunca funciona.
-      if (otpResult.isLocalCode && otpResult.code) {
-        console.log('⚠️ OTP local generado (rate limit de Supabase). Código visible en consola.');
-        setLocalVerificationCode(otpResult.code);
-      } else {
-        setLocalVerificationCode(undefined); // código real enviado por email
+      const otpResult = await sendLoginOTP(email);
+      if (!otpResult.success) {
+        toast.error('No se pudo enviar el código de verificación', {
+          description: otpResult.error,
+        });
+        setLoading(false);
+        return;
       }
 
       // ── PASO 4: Guardar auth pendiente y mostrar pantalla 2FA ────
@@ -143,8 +142,12 @@ export function CollaboratorLoginScreen({ onBack, onLoginSuccess }: Collaborator
   };
 
   // ── 2FA COMPLETADA ─────────────────────────────────────────────
-  const handleEmailVerificationComplete = () => {
-    if (!pendingAuth) return;
+  const handleEmailVerificationComplete = (session?: any) => {
+    if (!pendingAuth || !session?.access_token) {
+      toast.error('No se pudo completar la verificación. Intenta de nuevo.');
+      return;
+    }
+    const accessToken: string = session.access_token;
 
     toast.success(`Bienvenido, ${pendingAuth.profile.name || pendingAuth.profile.full_name || email}`);
 
@@ -152,11 +155,11 @@ export function CollaboratorLoginScreen({ onBack, onLoginSuccess }: Collaborator
     // encuentren la sesión al montar.
     localStorage.setItem('admin_user',         JSON.stringify(pendingAuth.user));
     localStorage.setItem('admin_profile',      JSON.stringify(pendingAuth.profile));
-    localStorage.setItem('admin_access_token', pendingAuth.accessToken);
+    localStorage.setItem('admin_access_token', accessToken);
 
     onLoginSuccess(
       pendingAuth.role,
-      pendingAuth.accessToken,
+      accessToken,
       pendingAuth.user,
       pendingAuth.profile,
     );
@@ -166,7 +169,6 @@ export function CollaboratorLoginScreen({ onBack, onLoginSuccess }: Collaborator
   const handleEmailVerificationBack = () => {
     setShowEmailVerification(false);
     setPendingAuth(null);
-    setLocalVerificationCode(undefined);
   };
 
   // ── PANTALLA DE VERIFICACIÓN 2FA ───────────────────────────────
@@ -174,7 +176,6 @@ export function CollaboratorLoginScreen({ onBack, onLoginSuccess }: Collaborator
     return (
       <EmailVerificationScreen
         email={email}
-        localCode={localVerificationCode}    // código local si hubo rate limit
         onBack={handleEmailVerificationBack}
         onVerify={handleEmailVerificationComplete}
         title="Verificación de seguridad"

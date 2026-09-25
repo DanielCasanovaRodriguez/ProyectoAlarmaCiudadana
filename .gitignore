@@ -22,3 +22,5 @@ npm-debug.log*
 # Sistema operativo
 .DS_Store
 Thumbs.db
+# Build antiguo
+build/

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { ArrowLeft, Mail, AlertCircle } from 'lucide-react';
 import { Button } from '../ui/button';
-import { verifyEmailCode, sendVerificationEmail, sendLoginOTP, getStoredVerificationCode } from '../../utils/verificationCode';
+import { verifyEmailCode, sendVerificationEmail, sendLoginOTP } from '../../utils/verificationCode';
 import { toast } from 'sonner';
 
 // ================================================================
@@ -12,7 +12,6 @@ interface EmailVerificationScreenProps {
   onBack:             () => void;
   onVerify:           (session?: any) => void;
   email:              string;
-  localCode?:         string;          // código local generado si Supabase tiene rate limit
   title?:             string;
   subtitle?:          string;
   isAdminLogin?:      boolean;
@@ -27,7 +26,6 @@ export function EmailVerificationScreen({
   onBack,
   onVerify,
   email,
-  localCode,                           // ← prop que venía de CollaboratorLoginScreen pero no se usaba
   title       = 'Verificación de correo',
   subtitle    = 'Ingresa el código de 8 dígitos enviado a tu correo',
   isAdminLogin      = false,
@@ -105,28 +103,7 @@ export function EmailVerificationScreen({
     setError('');
 
     try {
-      // ── PRIORIDAD 1: Código local por prop (pasado directamente desde CollaboratorLoginScreen)
-      // Se usa cuando Supabase devolvió rate limit y generamos el código localmente.
-      if (localCode && enteredCode === localCode) {
-        console.log('✅ Código local (prop) verificado correctamente');
-        toast.success('Código verificado correctamente');
-        setIsLoading(false);
-        onVerify(undefined);
-        return;
-      }
-
-      // ── PRIORIDAD 2: Código local en localStorage (almacenado por storeVerificationCode)
-      // Cubre el caso en que el código se generó en una llamada anterior y se guardó.
-      const storedCode = getStoredVerificationCode(email);
-      if (storedCode && enteredCode === storedCode) {
-        console.log('✅ Código local (localStorage) verificado correctamente');
-        toast.success('Código verificado correctamente');
-        setIsLoading(false);
-        onVerify(undefined);
-        return;
-      }
-
-      // ── PRIORIDAD 3: Verificar contra Supabase Auth (OTP real)
+      // El código se valida únicamente contra Supabase Auth
       console.log(`🔐 Verificando código con Supabase (tipo: ${verificationType}) para: ${email}`);
       const result = await verifyEmailCode(email, enteredCode, verificationType);
 
@@ -255,15 +232,6 @@ export function EmailVerificationScreen({
               </div>
             )}
 
-            {/* Aviso de código local (solo en desarrollo / rate limit) */}
-            {localCode && (
-              <div className="mt-3 px-4 py-2 bg-orange-50 rounded-lg border border-orange-300">
-                <p className="text-sm text-orange-800">
-                  ⚠️ <strong>Modo fallback activo:</strong> Supabase tiene límite de envíos.
-                  El código se generó localmente. Revisa la consola del navegador (F12) para verlo.
-                </p>
-              </div>
-            )}
           </div>
 
           {/* Error */}

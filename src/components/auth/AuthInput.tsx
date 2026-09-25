@@ -10,6 +10,7 @@ interface AuthInputProps {
   placeholder?: string;
   error?:       string;
   required?:    boolean;
+  disabled?:    boolean;
 }
 
 export function AuthInput({
@@ -21,6 +22,7 @@ export function AuthInput({
   placeholder,
   error,
   required = false,
+  disabled = false,
 }: AuthInputProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [isFocused,    setIsFocused]    = useState(false);
@@ -47,6 +49,7 @@ export function AuthInput({
 
       <div className="relative">
         <input
+          disabled={disabled}
           type={inputType}
           value={value}
           onChange={e => onChange(e.target.value)}

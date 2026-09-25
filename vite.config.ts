@@ -20,10 +20,6 @@ export default defineConfig({
   resolve: {
     extensions: ['.js', '.jsx', '.ts', '.tsx', '.json'],
     alias: {
-      'sonner': 'sonner',
-      'react-hook-form@7.55.0': 'react-hook-form',
-      '@supabase/supabase-js@2': '@supabase/supabase-js',
-      '@jsr/supabase__supabase-js@2.49.8': '@jsr/supabase__supabase-js',
       '@': path.resolve(__dirname, './src'),
     },
   },
