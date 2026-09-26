@@ -17,9 +17,16 @@ set public = false,
       'audio/mpeg','audio/mp3','audio/wav','audio/webm','audio/ogg']
 where id = 'evidencias';
 
+-- Políticas anteriores del bucket (producción, 2026-09-25): lectura pública
+-- para cualquiera, subida a cualquier carpeta de alerta y borrado por dueño.
+drop policy if exists "Anyone can view files"                on storage.objects;
+drop policy if exists "Authenticated users can upload files" on storage.objects;
+drop policy if exists "Users can delete their own files"     on storage.objects;
+
 drop policy if exists evidencias_insert_propias on storage.objects;
 drop policy if exists evidencias_select       on storage.objects;
 drop policy if exists evidencias_delete_admin on storage.objects;
+drop policy if exists evidencias_delete       on storage.objects;
 
 -- Subir: solo a la carpeta de una alerta propia
 create policy evidencias_insert_propias on storage.objects for insert to authenticated
@@ -43,6 +50,6 @@ create policy evidencias_select on storage.objects for select to authenticated
     )
   );
 
--- Borrar: solo administradores
-create policy evidencias_delete_admin on storage.objects for delete to authenticated
-  using (bucket_id = 'evidencias' and public.es_admin());
+-- Borrar: quien subió el archivo o un administrador
+create policy evidencias_delete on storage.objects for delete to authenticated
+  using (bucket_id = 'evidencias' and (owner = auth.uid() or public.es_admin()));

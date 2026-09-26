@@ -45,7 +45,7 @@ from information_schema.triggers
 where trigger_schema in ('public', 'auth')
 order by 1, 2;
 
--- 7. Funciones propias (incluye el trigger de alta de usuarios)
+-- 7. Funciones propias (sin las de extensiones como PostGIS)
 select p.proname as funcion, p.prosecdef as security_definer,
        pg_get_function_identity_arguments(p.oid) as argumentos,
        pg_get_functiondef(p.oid) as definicion

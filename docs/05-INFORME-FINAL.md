@@ -81,8 +81,6 @@ Añadidas específicamente para móvil:
 
 | Pendiente | Motivo | Cómo completarlo |
 |---|---|---|
-| **Aplicar las 3 migraciones en Supabase** | Requiere acceso a tu proyecto Supabase (inicio de sesión tuyo). La consulta directa a producción fue bloqueada por la política de permisos del asistente | [02 §6](02-INSTALACION-Y-EJECUCION.md) |
-| Auditar el esquema real (FK, índices, triggers, políticas actuales) | Mismo motivo | `supabase/audit/00_inspeccion.sql` |
 | Activar push | Requiere crear un proyecto Firebase con tu cuenta | [03-NOTIFICACIONES.md](03-NOTIFICACIONES.md) |
 | Pruebas con inicio de sesión y prueba de integración Web ⇄ Android | Requieren credenciales reales, que el asistente no introduce | [04-PRUEBAS.md](04-PRUEBAS.md) |
 | Aplicar MFA TOTP (`aal2`) a colaboradores | Mejora sobre el OTP por correo; requiere activarlo en el panel de Supabase | Recomendación §8 |
@@ -101,7 +99,8 @@ Añadidas específicamente para móvil:
 - Las teselas de OpenStreetMap tienen política de uso justo. En producción conviene un proveedor de mapas con clave.
 - Aviso inofensivo de Capacitor en el log (“Error injecting safe area CSS”) al iniciar.
 - Vulnerabilidad moderada solo de desarrollo (`uuid` vía `@capacitor/cli` → `xcode`, usada para iOS). No afecta a la app.
-- Mientras las migraciones no se apliquen, **la seguridad sigue dependiendo de las políticas actuales de Supabase**, que no se han podido revisar.
+- `spatial_ref_sys` (tabla de PostGIS) no tiene RLS: son datos de referencia públicos, sin información de usuarios.
+- `kv_store_1c8cef82` (35 filas) es un resto de Figma Make; tiene RLS sin políticas (inaccesible para clientes). Se puede borrar tras revisarla.
 
 ## 8. Recomendaciones
 
@@ -114,7 +113,25 @@ Añadidas específicamente para móvil:
 7. Para SOS en segundo plano o botón físico: plugin nativo Kotlin con *foreground service*, dentro del mismo proyecto Capacitor.
 8. iOS: `npm i @capacitor/ios && npx cap add ios` en una Mac.
 
-## 9. Cambios en el equipo (todo en D:)
+## 9. Migraciones aplicadas en producción (2026-09-25)
+
+La inspección del esquema real (`supabase/audit/resultados/`, no versionado) **confirmó** las vulnerabilidades:
+- El trigger `crear_perfil_nuevo_usuario` tomaba el rol de los metadatos del registro: **cualquiera podía registrarse como admin**.
+- La política `profile update own` permitía que cualquier usuario se **cambiara el rol**.
+- `Citizens can view active area alerts` exponía `user_id` de todas las alertas activas.
+- `history insert on change` permitía escribir historial falso en alertas ajenas.
+- `alert_types` estaba **sin RLS** (cualquiera podía modificarla).
+- `Anyone can view files` hacía **públicas** las evidencias.
+
+Proceso:
+1. Réplica exacta del esquema, triggers y políticas de producción en `supabase/tests`: 6/6 vulnerabilidades reproducidas; tras migrar, **30/30 pruebas correctas**.
+2. Script de reversión generado: `supabase/audit/reversion_politicas_20260925.sql` (recrea las 34 políticas anteriores).
+3. Aplicadas `…0001`, `…0002` y `…0003` con `supabase db query --linked`, y registradas en el historial (`migration repair`).
+4. Verificado en producción, dentro de una transacción revertida: un registro con `role=admin` queda `citizen` y no puede ascenderse.
+
+Revisa en *Authentication > Users* que la única cuenta `admin` existente sea la tuya.
+
+## 10. Cambios en el equipo (todo en D:)
 
 | Qué | Dónde |
 |---|---|

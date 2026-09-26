@@ -99,6 +99,22 @@ revoke all on function public.alertas_activas_publicas() from public, anon;
 grant execute on function public.alertas_activas_publicas() to authenticated;
 
 -- ---------------------------------------------------------------------
+-- ¿Ya existe un trigger en `alerts` que registre historial / auditoría?
+-- (En producción: trg_alerts_status_history → log_status_change() y
+--  trg_audit_alerts → log_alert_changes().) Evita registros duplicados.
+-- ---------------------------------------------------------------------
+create or replace function public._alerts_tiene_trigger(p_patron text)
+returns boolean language sql stable security definer set search_path = public
+as $$
+  select exists (
+    select 1 from information_schema.triggers
+    where event_object_schema = 'public' and event_object_table = 'alerts'
+      and (trigger_name ilike p_patron or action_statement ilike p_patron)
+  )
+$$;
+revoke all on function public._alerts_tiene_trigger(text) from public, anon, authenticated;
+
+-- ---------------------------------------------------------------------
 -- Cambio de estado de una alerta (operador / admin).
 -- Valida la transición, fija ack_at / resolved_at, registra historial y
 -- auditoría en una sola transacción. Antes esto lo hacía cada cliente.
@@ -114,7 +130,6 @@ as $$
 declare
   v_alerta  public.alerts;
   v_anterior text;
-  v_hay_trigger_historial boolean;
 begin
   if not public.es_staff() then
     raise exception 'Solo operadores o administradores pueden cambiar el estado de una alerta'
@@ -148,23 +163,26 @@ begin
      returning *', p_nuevo, p_nuevo, p_nuevo, p_nuevo)
   into v_alerta using p_alert_id;
 
-  -- Si ya existe un trigger que registra el historial, no se duplica.
-  select exists (
-    select 1 from information_schema.triggers
-    where event_object_schema = 'public' and event_object_table = 'alerts'
-      and action_statement ilike '%history%'
-  ) into v_hay_trigger_historial;
-
-  if not v_hay_trigger_historial then
+  -- Historial: si un trigger ya lo registró, solo se añade la nota;
+  -- si no existe tal trigger, se inserta aquí.
+  if public._alerts_tiene_trigger('%status_history%') or public._alerts_tiene_trigger('%log_status_change%') then
+    if nullif(trim(p_nota), '') is not null then
+      update public.alert_status_history set note = trim(p_nota)
+      where id = (select max(id) from public.alert_status_history where alert_id = p_alert_id);
+    end if;
+  else
     execute format(
       'insert into public.alert_status_history (alert_id, old_status, new_status, changed_by, note)
        values ($1, %L, %L, $2, $3)', v_anterior, p_nuevo)
     using p_alert_id, auth.uid(), nullif(trim(p_nota), '');
   end if;
 
-  insert into public.auditoria (usuario_id, usuario_email, accion, entidad, entidad_id, detalle)
-  values (auth.uid(), auth.jwt() ->> 'email', 'cambiar_estado', 'alerts', p_alert_id,
-          jsonb_build_object('de', v_anterior, 'a', p_nuevo, 'nota', p_nota));
+  -- Auditoría: solo si no existe ya un trigger de auditoría sobre alerts.
+  if not (public._alerts_tiene_trigger('%audit%') or public._alerts_tiene_trigger('%log_alert_changes%')) then
+    insert into public.auditoria (usuario_id, usuario_email, accion, entidad, entidad_id, detalle)
+    values (auth.uid(), auth.jwt() ->> 'email', 'cambiar_estado', 'alerts', p_alert_id,
+            jsonb_build_object('de', v_anterior, 'a', p_nuevo, 'nota', p_nota));
+  end if;
 
   return v_alerta;
 end;
@@ -179,7 +197,6 @@ language plpgsql security definer set search_path = public
 as $$
 declare
   v_alerta public.alerts;
-  v_hay_trigger_historial boolean;
 begin
   select * into v_alerta from public.alerts
   where id = p_alert_id and user_id = auth.uid()
@@ -198,13 +215,10 @@ begin
   returning * into v_alerta;
   perform set_config('app.cambio_autorizado', 'off', true);
 
-  select exists (
-    select 1 from information_schema.triggers
-    where event_object_schema = 'public' and event_object_table = 'alerts'
-      and action_statement ilike '%history%'
-  ) into v_hay_trigger_historial;
-
-  if not v_hay_trigger_historial then
+  if public._alerts_tiene_trigger('%status_history%') or public._alerts_tiene_trigger('%log_status_change%') then
+    update public.alert_status_history set note = 'Cancelada por el ciudadano desde la aplicación'
+    where id = (select max(id) from public.alert_status_history where alert_id = p_alert_id);
+  else
     insert into public.alert_status_history (alert_id, old_status, new_status, changed_by, note)
     values (p_alert_id, 'open', 'resolved', auth.uid(), 'Cancelada por el ciudadano desde la aplicación');
   end if;

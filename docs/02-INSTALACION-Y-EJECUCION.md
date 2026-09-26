@@ -157,11 +157,13 @@ La API es la de Supabase (PostgREST + RPC). Endpoints efectivos:
 
 Roles: `citizen`, `operator`, `admin`, `auditor` (lectura). Autenticación: JWT de Supabase Auth; en Android la sesión queda en el almacenamiento privado del WebView (copias de seguridad desactivadas).
 
-## 6. Aplicar las migraciones en Supabase
+## 6. Migraciones de Supabase
+
+> **Estado:** las tres migraciones ya están aplicadas en producción (2026-09-25). Esta sección sirve para nuevos entornos o futuras migraciones.
 
 1. **Inspección (solo lectura):** ejecuta `supabase/audit/00_inspeccion.sql` en el SQL Editor y guarda los resultados. El bloque 5 es la copia de las políticas actuales.
-2. **Prueba local:** `npm run test:db` (29 pruebas, sin red).
-3. **Aplicar**, en orden, en el SQL Editor o con `npx supabase db push`:
+2. **Prueba local:** `npm run test:db` (réplica de producción: reproduce 6 vulnerabilidades y comprueba 30 escenarios tras migrar, sin red).
+3. **Aplicar**, en orden, en el SQL Editor o con `npx supabase db query --linked -f <archivo>` (no necesita Docker) y registrar con `npx supabase migration repair --status applied <versión> --linked`:
    1. `20260925000001_funciones_negocio.sql` (aditivo)
    2. `20260925000002_politicas_rls.sql` (reemplaza las políticas; revisar primero)
    3. `20260925000003_storage_evidencias.sql` (evidencias privadas)

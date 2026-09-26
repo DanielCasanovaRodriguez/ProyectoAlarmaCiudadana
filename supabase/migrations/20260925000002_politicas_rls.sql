@@ -93,8 +93,12 @@ begin
   return new;
 end;
 $$;
+-- Nombre con prefijo "trg_a0_" para ejecutarse ANTES que trg_alerts_status_history
+-- (PostgreSQL ejecuta los triggers BEFORE en orden alfabético): así un intento
+-- no autorizado de cambiar el estado no deja un registro falso en el historial.
 drop trigger if exists trg_proteger_campos_alerta on public.alerts;
-create trigger trg_proteger_campos_alerta
+drop trigger if exists trg_a0_proteger_campos_alerta on public.alerts;
+create trigger trg_a0_proteger_campos_alerta
   before update on public.alerts
   for each row execute function public.proteger_campos_alerta();
 
