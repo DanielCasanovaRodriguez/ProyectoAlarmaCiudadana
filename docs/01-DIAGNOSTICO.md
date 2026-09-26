@@ -1,5 +1,7 @@
 # Alerta Ciudadana — Diagnóstico técnico y arquitectura propuesta
 
+> Documento de la auditoría inicial (estado *antes* de los cambios). Lo implementado está en [05-INFORME-FINAL.md](05-INFORME-FINAL.md).
+
 Fecha: 2026-09-25 · Estado del repo auditado: commit `242018c` (árbol limpio, 2 commits)
 
 ---
@@ -110,7 +112,7 @@ No se pudieron verificar: llaves foráneas, índices, triggers, vistas, funcione
 | C3 | **Posible escalada de privilegios** | `updateUserProfile` acepta cualquier campo de `profiles` (incluye `role`, `status`); el registro envía `role` en metadatos | Si la política UPDATE de `profiles` permite al usuario editar su fila, un ciudadano puede volverse `admin` | Política/trigger que impida cambiar `role/status/bloqueo` salvo admin; el trigger de alta debe ignorar `role` de metadatos | `profileService.tsx`, `authService.ts`, BD |
 | C4 | **Evidencias públicas** | Bucket `evidencias` usado con `getPublicUrl` | Fotos/audios de incidentes (datos personales, Ley 1581) accesibles por cualquiera con la URL | Bucket privado + URLs firmadas + políticas de Storage por rol | `mediaService.tsx` |
 | C5 | **Anonimato no protegido** | `getActiveAlerts` hace `select('*')` a todas las alertas activas | Cualquier ciudadano obtiene `user_id` de todos los reportes, incluidos los “anónimos” | Vista/función pública sin `user_id`; RLS por rol | `alertService.ts`, BD |
-| C6 | **Modo desarrollo en producción** | `IS_DEVELOPMENT = true` fijo; se imprime el OTP fijo `12345678`, correos y contraseña de prueba en el bundle | Información sensible expuesta en el sitio de Vercel | Derivar de `import.meta.env.DEV`; eliminar mock | `config/environment.ts`, `devAuthService.ts` |
+| C6 | **Códigos de verificación expuestos** *(corregido tras verificar el bundle)* | `config/environment.ts` (OTP fijo, contraseña de prueba) **no se importaba y no llegaba a producción**. Lo que sí llegaba: el código 2FA generado en el navegador (ver C1) y una pantalla 2FA simulada que aceptaba cualquier código | Acceso a paneles de colaborador sin segundo factor | Eliminar ambos (hecho) | `verificationCode.ts`, `TwoFactorVerificationScreen.tsx` |
 
 ### Altos
 
@@ -124,12 +126,11 @@ No se pudieron verificar: llaves foráneas, índices, triggers, vistas, funcione
 
 - Sin `tsconfig.json` → no hay comprobación de tipos; sin linter; **sin pruebas**.
 - Bundle de 1,18 MB en un solo chunk.
-- Leaflet desde `unpkg` sin SRI y fuera de `package.json` (duplicado en `MapView` y `OperatorMap`).
+- Leaflet desde `unpkg` en tiempo de ejecución (con SRI, verificado) y fuera de `package.json`.
 - Carpeta `build/` versionada y obsoleta (duplica `dist/`).
 - Código muerto: `devAuthService.ts`, `saveAlertOffline`, `registrarIntentoFallido`, `updateSystemConfig`, tabla `alert_media`.
 - `cancelAlert` marca `resolved` (no existe estado “cancelada”) → métricas mezcladas.
 - `redirectTo: /reset-password` no tiene ruta (no hay router); funciona solo porque se usa OTP.
-- Texto con codificación rota (`MÃ³vil`) en `package.json`, `index.html`, `README.md`.
 - Ubicación: una sola lectura, sin refresco antes de enviar el SOS.
 - `console.log` masivo con correos y códigos.
 
