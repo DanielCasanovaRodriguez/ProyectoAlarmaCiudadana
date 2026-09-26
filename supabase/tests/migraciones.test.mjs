@@ -134,6 +134,21 @@ end $$;
 create trigger trg_audit_alerts after insert or update or delete on public.alerts
   for each row execute function public.log_alert_changes();
 
+-- Otras funciones heredadas de producción (cuerpos simplificados; PostGIS no existe en PGlite)
+create function public.set_updated_at() returns trigger language plpgsql as $$ begin new.updated_at := now(); return new; end $$;
+create function public.actualizar_updated_at() returns trigger language plpgsql as $$ begin new.updated_at := now(); return new; end $$;
+create function public.set_geom_from_latlng() returns trigger language plpgsql as $$ begin return new; end $$;
+create function public.alerts_near(_lat double precision, _lng double precision, _meters integer) returns setof public.alerts
+  language sql stable as $$ select * from public.alerts $$;
+create function public.get_alert_media(alert_id uuid) returns text[] language plpgsql security definer as
+  $$ declare urls text[]; begin select media_urls into urls from alerts where id = alert_id; return coalesce(urls, '{}'); end $$;
+create function public.count_alert_media(alert_id uuid) returns integer language plpgsql security definer as
+  $$ begin return 0; end $$;
+create function public.alert_has_videos(alert_id uuid) returns boolean language plpgsql security definer as
+  $$ begin return false; end $$;
+create table public.spatial_ref_sys (srid int primary key, auth_name varchar);
+grant select on public.spatial_ref_sys to anon, authenticated;
+
 -- Políticas vigentes en producción (las relevantes, tal como están)
 alter table public.profiles             enable row level security;
 alter table public.alerts               enable row level security;
@@ -252,6 +267,10 @@ await prueba('cualquiera (sin sesión) lista las evidencias', async () => {
   await comoSistema(`insert into storage.objects (bucket_id, name, owner) values ('evidencias', $1, $2)`,
     [`alertas/${previa}/previa.jpg`, U.ana]);
   igual((await como('anon', `select * from storage.objects`)).rows.length, 1);
+});
+await prueba('sin sesión se leen rutas de evidencias con get_alert_media()', async () => {
+  await comoSistema(`update public.alerts set media_urls = array['alertas/p/secreta.jpg'] where id = $1`, [previa]);
+  igual((await como('anon', `select public.get_alert_media($1) as m`, [previa])).rows[0].m[0], 'alertas/p/secreta.jpg');
 });
 const vulnerabilidades = ok;
 if (fallos) { console.log('\nLa réplica de producción no se comporta como se esperaba.'); process.exit(1); }
@@ -406,10 +425,26 @@ await prueba('ver evidencia: autora y operadora sí, otro ciudadano no', async (
   igual((await como(U.beto, `select * from storage.objects`)).rows.length, 0);
 });
 
+console.log('\nEndurecimiento (advisors)');
+await prueba('sin sesión ya NO se llama a get_alert_media()', async () => {
+  await debeFallar(como('anon', `select public.get_alert_media($1)`, [alertaAna]), '42501');
+});
+await prueba('las funciones de trigger no se pueden invocar como RPC', async () => {
+  await debeFallar(como(U.ana, `select public.crear_perfil_nuevo_usuario()`), undefined);
+  const r = await comoSistema(`select has_function_privilege('authenticated', 'public.log_alert_changes()', 'execute') as p`);
+  igual(r.rows[0].p, false);
+});
+await prueba('los triggers siguen funcionando tras revocar EXECUTE (alta de usuario)', async () => {
+  const id = '00000000-0000-0000-0000-0000000000f2';
+  await comoSistema(`insert into auth.users (id, raw_user_meta_data) values ($1, '{"full_name":"Nuevo","role":"admin"}')`, [id]);
+  const r = await comoSistema(`select role, full_name from public.profiles where id = $1`, [id]);
+  igual(r.rows[0].role, 'citizen'); igual(r.rows[0].full_name, 'Nuevo');
+});
+
 await prueba('las migraciones se pueden volver a ejecutar (idempotentes)', async () => {
   for (const f of migraciones) { await comoSistema('select 1'); await db.exec(readFileSync(join(dir, f), 'utf8')); }
 });
 
-console.log(`\nVulnerabilidades de producción reproducidas antes de migrar: ${vulnerabilidades}/6`);
+console.log(`\nVulnerabilidades de producción reproducidas antes de migrar: ${vulnerabilidades}/7`);
 console.log(`Resultado: ${ok} correctas, ${fallos} fallidas`);
 process.exit(fallos ? 1 : 0);
