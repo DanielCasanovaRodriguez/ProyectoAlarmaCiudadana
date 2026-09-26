@@ -16,6 +16,7 @@ import {
   AlertStatusHistoryEntry,
   AsignacionUnidad,
 } from '../../services/alertService';
+import { EvidenceImage } from '../EvidenceImage';
 import { useSignedMediaUrls } from '../../hooks/useSignedMediaUrls';
 import { Alert as AppAlert } from '../../App';
 
@@ -512,14 +513,7 @@ export function AlertDetailScreen({
                     className="aspect-square rounded-xl overflow-hidden bg-gray-100 border border-gray-200"
                   >
                     {isImage(url) ? (
-                      <img
-                        src={signedMedia[idx] ?? ''}
-                        alt={`Evidencia ${idx + 1}`}
-                        className="w-full h-full object-cover"
-                        onError={e => {
-                          (e.target as HTMLImageElement).style.display = 'none';
-                        }}
-                      />
+                      <EvidenceImage src={signedMedia[idx]} alt={`Evidencia ${idx + 1}`} />
                     ) : (
                       <div className="w-full h-full flex flex-col items-center justify-center gap-1">
                         <MediaIcon className="w-6 h-6 text-gray-400" />
