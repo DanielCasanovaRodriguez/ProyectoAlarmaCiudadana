@@ -72,6 +72,24 @@ export async function ensureLocationPermission(): Promise<void> {
 }
 
 /**
+ * Indica si el permiso de ubicación YA está concedido, sin mostrar ningún
+ * diálogo. Se usa al restaurar la sesión para no interrumpir al usuario.
+ */
+export async function hasLocationPermission(): Promise<boolean> {
+  try {
+    if (Capacitor.isNativePlatform()) {
+      const s = await Geolocation.checkPermissions();
+      return s.location === 'granted' || s.coarseLocation === 'granted';
+    }
+    if (!navigator.permissions?.query) return false;
+    const s = await navigator.permissions.query({ name: 'geolocation' as PermissionName });
+    return s.state === 'granted';
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Obtiene una posición fresca y precisa (para enviar una alerta).
  */
 export async function getCurrentLocation(options?: {

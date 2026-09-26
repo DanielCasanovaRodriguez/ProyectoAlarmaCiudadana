@@ -1,6 +1,8 @@
 import React from 'react';
 import { Button } from '../ui/button';
-import { Shield, MapPin, Users } from 'lucide-react';
+import { Shield, MapPin, Users, Download } from 'lucide-react';
+import { isNative } from '../../platform';
+import { ANDROID_APK_URL, APP_VERSION } from '../../config/app';
 
 interface WelcomeScreenProps {
   onNext: () => void;
@@ -58,9 +60,21 @@ export function WelcomeScreen({ onNext }: WelcomeScreenProps) {
         Comenzar
       </Button>
 
+      {/* Descarga de la app Android (solo en el navegador) */}
+      {!isNative && (
+        <a
+          href={ANDROID_APK_URL}
+          className="mt-4 w-full max-w-sm flex items-center justify-center gap-2 rounded-md border border-white/60 text-white hover:bg-white/10"
+          style={{ fontSize: '15px', fontWeight: 600, height: '48px' }}
+        >
+          <Download className="w-5 h-5" />
+          Descargar app para Android
+        </a>
+      )}
+
       {/* Footer */}
       <div className="mt-8 text-center" style={{ fontSize: '12px' }}>
-        <p className="text-blue-200">Versión 1.0.0</p>
+        <p className="text-blue-200">Versión {APP_VERSION}</p>
         <p className="text-blue-200 mt-1">Tu seguridad es nuestra prioridad</p>
       </div>
     </div>

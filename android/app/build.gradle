@@ -1,5 +1,14 @@
 apply plugin: 'com.android.application'
 
+// Firma de release: la llave y sus contraseñas viven FUERA del repositorio.
+// Ruta indicada por la propiedad `alertaKeystoreProps` (p. ej. en
+// %GRADLE_USER_HOME%/gradle.properties). Sin ella, el release queda sin firmar.
+def keystoreProps = new Properties()
+def keystorePropsPath = project.findProperty('alertaKeystoreProps')
+if (keystorePropsPath && file(keystorePropsPath).exists()) {
+    file(keystorePropsPath).withInputStream { keystoreProps.load(it) }
+}
+
 android {
     namespace = "co.alertaciudadana.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +16,8 @@ android {
         applicationId "co.alertaciudadana.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode 2
+        versionName "1.1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +25,21 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (keystoreProps['storeFile']) {
+                storeFile file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
+    }
     buildTypes {
         release {
+            if (keystoreProps['storeFile']) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

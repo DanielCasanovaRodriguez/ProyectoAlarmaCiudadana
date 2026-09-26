@@ -32,9 +32,9 @@ import {
   updateAlertMediaUrls,
   cancelAlert as cancelAlertDB,
 } from './services/alertService.ts';
-import { completeRegistration, sendPasswordResetOTP } from './services/authService.ts';
+import { completeRegistration, sendPasswordResetOTP, cerrarSesion } from './services/authService.ts';
 import { uploadMultipleFiles } from './services/mediaService';
-import { getCurrentLocation, initNativeShell, registerForPush } from './platform';
+import { getCurrentLocation, hasLocationPermission, initNativeShell, registerForPush, unregisterPush, watchLocation } from './platform';
 import { supabase } from './utils/supabase/client';
 
 // ================================================================
@@ -261,6 +261,101 @@ export default function App() {
     return () => cleanup?.();
   }, [appState.auth.isLoggedIn]);
 
+  // ── Sesión persistente ───────────────────────────────────────────
+  // Al abrir la app (web o Android) se recupera la sesión guardada por
+  // Supabase y se lleva al usuario a su pantalla según el rol en la BD.
+  const [restoringSession, setRestoringSession] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return;
+
+        const { data: perfil } = await supabase
+          .from('profiles')
+          .select('full_name, role, status')
+          .eq('id', session.user.id)
+          .single();
+
+        if (cancelled) return;
+        if (!perfil || perfil.status !== 'active') {
+          await supabase.auth.signOut();
+          return;
+        }
+
+        if (perfil.role === 'admin') {
+          setAppState(prev => ({ ...prev, currentScreen: 'admin-panel' }));
+          return;
+        }
+        if (perfil.role === 'operator' || perfil.role === 'auditor') {
+          setAppState(prev => ({ ...prev, currentScreen: 'operator-dashboard' }));
+          return;
+        }
+
+        // Ciudadano: ubicación real del dispositivo si el permiso ya existe
+        let location: { lat: number; lng: number } | null = null;
+        if (await hasLocationPermission()) {
+          try {
+            const c = await getCurrentLocation({ highAccuracy: true, timeoutMs: 10_000, maxAgeMs: 60_000 });
+            location = { lat: c.lat, lng: c.lng };
+          } catch (err) {
+            console.warn('No se pudo obtener la ubicación al restaurar la sesión:', err);
+          }
+        }
+        if (cancelled) return;
+        setAppState(prev => ({
+          ...prev,
+          auth: { ...prev.auth, isLoggedIn: true, email: session.user.email ?? '' },
+          user: { ...prev.user, name: perfil.full_name ?? '', hasLocationPermission: !!location },
+          userLocation: location,
+          currentScreen: location ? 'main-map' : 'location-permission',
+        }));
+      } catch (err) {
+        console.warn('No se pudo restaurar la sesión:', err);
+      } finally {
+        if (!cancelled) setRestoringSession(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Si la sesión se cierra o caduca (en otro dispositivo, token revocado),
+  // se vuelve a la pantalla de acceso.
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        setAppState(prev => {
+          const enZonaPrivada = ['main-map', 'alert-history', 'alert-detail', 'profile', 'alert-confirmation',
+            'emergency-contact', 'operator-dashboard', 'operator-settings', 'admin-panel'].includes(prev.currentScreen);
+          return enZonaPrivada
+            ? { ...prev, auth: { ...prev.auth, isLoggedIn: false }, currentScreen: 'auth-welcome' }
+            : prev;
+        });
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // ── Ubicación real en vivo mientras el mapa está visible ─────────
+  // Solo si el permiso ya fue concedido (no vuelve a preguntar) y se
+  // detiene al salir del mapa para ahorrar batería.
+  useEffect(() => {
+    if (appState.currentScreen !== 'main-map') return;
+    let stop: (() => void) | undefined;
+    let cancelled = false;
+    hasLocationPermission().then(async (granted) => {
+      if (!granted || cancelled) return;
+      stop = await watchLocation(
+        (c) => setAppState(prev => ({ ...prev, userLocation: { lat: c.lat, lng: c.lng } })),
+        (err) => console.warn('Seguimiento de ubicación:', err.message),
+      );
+      if (cancelled) stop();
+    }).catch(() => undefined);
+    return () => { cancelled = true; stop?.(); };
+  }, [appState.currentScreen]);
+
   // ── Notificaciones push (Android, cuando Firebase está configurado) ──
   const pushRegistered = useRef(false);
   useEffect(() => {
@@ -430,7 +525,13 @@ export default function App() {
     navigateToScreen('otp-verification');
   };
 
-  const handleLogout = () => {
+  // Cierre de sesión real: borra el token push del dispositivo, cierra la
+  // sesión en Supabase (antes solo cambiaba de pantalla) y limpia el estado.
+  const handleLogout = async () => {
+    try { await unregisterPush(); } catch { /* sin push */ }
+    try { await cerrarSesion(); } catch (err) { console.warn('Error al cerrar sesión:', err); }
+    ['admin_user', 'admin_profile', 'admin_token', 'admin_access_token'].forEach(k => localStorage.removeItem(k));
+    pushRegistered.current = false;
     updateAppState({
       auth:            { isLoggedIn: false, email: '', password: '', resetEmail: '' },
       user:            { name: '', hasLocationPermission: false, hasCompletedOnboarding: false },
@@ -439,8 +540,8 @@ export default function App() {
       areaAlerts:      [],
       selectedAlertId: null,
       onboardingStep:  0,
+      currentScreen:   'auth-welcome',
     });
-    navigateToScreen('welcome');
   };
 
   // ================================================================
@@ -727,12 +828,7 @@ export default function App() {
         return (
           <OperatorDashboard
             onNavigateToSettings={() => navigateToScreen('operator-settings')}
-            onLogout={() => {
-              localStorage.removeItem('admin_user');
-              localStorage.removeItem('admin_profile');
-              localStorage.removeItem('admin_access_token');
-              navigateToScreen('welcome');
-            }}
+            onLogout={handleLogout}
             accessToken={localStorage.getItem('admin_access_token') || undefined}
           />
         );
@@ -748,13 +844,7 @@ export default function App() {
       case 'admin-panel':
         return (
           <AdminPanel
-            onLogout={() => {
-              localStorage.removeItem('admin_user');
-              localStorage.removeItem('admin_profile');
-              localStorage.removeItem('admin_token');
-              localStorage.removeItem('admin_access_token');
-              navigateToScreen('welcome');
-            }}
+            onLogout={handleLogout}
           />
         );
 
@@ -762,6 +852,15 @@ export default function App() {
         return <WelcomeScreen onNext={() => navigateToScreen('onboarding')} />;
     }
   };
+
+  if (restoringSession) {
+    return (
+      <div className="h-screen w-full flex flex-col items-center justify-center bg-white gap-3">
+        <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm text-gray-500">Cargando…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen w-full bg-gray-100">
