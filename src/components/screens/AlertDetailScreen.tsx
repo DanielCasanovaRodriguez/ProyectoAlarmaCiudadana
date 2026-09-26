@@ -16,6 +16,7 @@ import {
   AlertStatusHistoryEntry,
   AsignacionUnidad,
 } from '../../services/alertService';
+import { useSignedMediaUrls } from '../../hooks/useSignedMediaUrls';
 import { Alert as AppAlert } from '../../App';
 
 // ================================================================
@@ -195,6 +196,7 @@ export function AlertDetailScreen({
   const displayType    = alert?.type_code ?? localAlert?.type ?? 'medical';
   const displayDesc    = alert?.description ?? localAlert?.description ?? null;
   const displayMedia   = alert?.media_urls ?? localAlert?.mediaUrls ?? [];
+  const signedMedia    = useSignedMediaUrls(displayMedia);
   const displayLat     = alert?.lat ?? localAlert?.location?.lat;
   const displayLng     = alert?.lng ?? localAlert?.location?.lng;
   const displayCreated = alert?.created_at ?? localAlert?.timestamp?.toISOString() ?? '';
@@ -511,7 +513,7 @@ export function AlertDetailScreen({
                   >
                     {isImage(url) ? (
                       <img
-                        src={url}
+                        src={signedMedia[idx] ?? ''}
                         alt={`Evidencia ${idx + 1}`}
                         className="w-full h-full object-cover"
                         onError={e => {

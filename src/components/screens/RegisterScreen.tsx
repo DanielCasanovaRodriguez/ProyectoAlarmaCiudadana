@@ -114,9 +114,7 @@ export function RegisterScreen({
       if (result.data?.user) {
         console.log('✅ Usuario creado, navegando a verificación de email');
         toast.success('Cuenta creada', {
-          description: result.localCode 
-            ? 'Usa el código que aparecerá en pantalla'
-            : 'Revisa tu correo electrónico para verificar tu cuenta'
+          description: 'Revisa tu correo electrónico para verificar tu cuenta'
         });
         
         // Navegar a verificación pasando email Y nombre

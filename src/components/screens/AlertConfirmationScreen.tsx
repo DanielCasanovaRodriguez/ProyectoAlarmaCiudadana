@@ -1,6 +1,7 @@
 import React from 'react';
 import { Alert } from '../../App';
 import { Button } from '../ui/button';
+import { useSignedMediaUrls } from '../../hooks/useSignedMediaUrls';
 import {
   CheckCircle, MapPin, Clock,
   AlertTriangle, Car, Shield, Flame, Users,
@@ -47,6 +48,7 @@ export function AlertConfirmationScreen({
   const config = alertConfig[alert.type] ?? defaultConfig;
   const Icon   = config.icon;
   const hasMedia = alert.mediaUrls && alert.mediaUrls.length > 0;
+  const signedMedia = useSignedMediaUrls(alert.mediaUrls);
 
   return (
     <div className="h-full bg-white flex flex-col items-center justify-center p-6 overflow-y-auto">
@@ -115,7 +117,7 @@ export function AlertConfirmationScreen({
                 >
                   {isImage(url) ? (
                     <img
-                      src={url}
+                      src={signedMedia[index] ?? ''}
                       alt={`Evidencia ${index + 1}`}
                       className="w-full h-full object-cover"
                       onError={e => {

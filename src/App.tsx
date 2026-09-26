@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { WelcomeScreen } from './components/screens/WelcomeScreen';
 import { OnboardingScreen } from './components/screens/OnboardingScreen';
 import { LocationPermissionScreen } from './components/screens/LocationPermissionScreen';
@@ -32,8 +32,9 @@ import {
   updateAlertMediaUrls,
   cancelAlert as cancelAlertDB,
 } from './services/alertService.ts';
-import { completeRegistration, sendPasswordResetOTP } from './services/authService.ts';
+import { completeRegistration, sendPasswordResetOTP, cerrarSesion } from './services/authService.ts';
 import { uploadMultipleFiles } from './services/mediaService';
+import { getCurrentLocation, hasLocationPermission, initNativeShell, registerForPush, unregisterPush, watchLocation } from './platform';
 import { supabase } from './utils/supabase/client';
 
 // ================================================================
@@ -222,6 +223,152 @@ export default function App() {
     };
   }, [appState.auth.isLoggedIn, appState.currentScreen]);
 
+  // ── Historial de pantallas (botón atrás de Android) ─────────────
+  // Pantallas raíz: "atrás" minimiza la app. Pantallas transitorias
+  // (verificaciones, confirmación): no se vuelve a ellas con "atrás".
+  const ROOT_SCREENS: Screen[] = ['welcome', 'auth-welcome', 'main-map', 'operator-dashboard', 'admin-panel'];
+  const TRANSIENT_SCREENS: Screen[] = ['email-verification', 'otp-verification', 'reset-password', 'alert-confirmation', 'location-permission'];
+  const historyRef   = useRef<Screen[]>([]);
+  const prevScreen   = useRef<Screen>(appState.currentScreen);
+  const goingBackRef = useRef(false);
+
+  useEffect(() => {
+    const current = appState.currentScreen;
+    const prev    = prevScreen.current;
+    if (current === prev) return;
+    if (ROOT_SCREENS.includes(current)) {
+      historyRef.current = [];
+    } else if (!goingBackRef.current && !TRANSIENT_SCREENS.includes(prev)) {
+      historyRef.current.push(prev);
+    }
+    goingBackRef.current = false;
+    prevScreen.current   = current;
+  }, [appState.currentScreen]);
+
+  const currentScreenRef = useRef(appState.currentScreen);
+  currentScreenRef.current = appState.currentScreen;
+
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    initNativeShell(() => {
+      if (ROOT_SCREENS.includes(currentScreenRef.current)) return false;
+      const target = historyRef.current.pop()
+        ?? (appState.auth.isLoggedIn ? 'main-map' : 'auth-welcome');
+      goingBackRef.current = true;
+      setAppState(prev => ({ ...prev, currentScreen: target }));
+      return true;
+    }).then(fn => { cleanup = fn; });
+    return () => cleanup?.();
+  }, [appState.auth.isLoggedIn]);
+
+  // ── Sesión persistente ───────────────────────────────────────────
+  // Al abrir la app (web o Android) se recupera la sesión guardada por
+  // Supabase y se lleva al usuario a su pantalla según el rol en la BD.
+  const [restoringSession, setRestoringSession] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return;
+
+        const { data: perfil } = await supabase
+          .from('profiles')
+          .select('full_name, role, status')
+          .eq('id', session.user.id)
+          .single();
+
+        if (cancelled) return;
+        if (!perfil || perfil.status !== 'active') {
+          await supabase.auth.signOut();
+          return;
+        }
+
+        if (perfil.role === 'admin') {
+          setAppState(prev => ({ ...prev, currentScreen: 'admin-panel' }));
+          return;
+        }
+        if (perfil.role === 'operator' || perfil.role === 'auditor') {
+          setAppState(prev => ({ ...prev, currentScreen: 'operator-dashboard' }));
+          return;
+        }
+
+        // Ciudadano: ubicación real del dispositivo si el permiso ya existe
+        let location: { lat: number; lng: number } | null = null;
+        if (await hasLocationPermission()) {
+          try {
+            const c = await getCurrentLocation({ highAccuracy: true, timeoutMs: 10_000, maxAgeMs: 60_000 });
+            location = { lat: c.lat, lng: c.lng };
+          } catch (err) {
+            console.warn('No se pudo obtener la ubicación al restaurar la sesión:', err);
+          }
+        }
+        if (cancelled) return;
+        setAppState(prev => ({
+          ...prev,
+          auth: { ...prev.auth, isLoggedIn: true, email: session.user.email ?? '' },
+          user: { ...prev.user, name: perfil.full_name ?? '', hasLocationPermission: !!location },
+          userLocation: location,
+          currentScreen: location ? 'main-map' : 'location-permission',
+        }));
+      } catch (err) {
+        console.warn('No se pudo restaurar la sesión:', err);
+      } finally {
+        if (!cancelled) setRestoringSession(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Si la sesión se cierra o caduca (en otro dispositivo, token revocado),
+  // se vuelve a la pantalla de acceso.
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        setAppState(prev => {
+          const enZonaPrivada = ['main-map', 'alert-history', 'alert-detail', 'profile', 'alert-confirmation',
+            'emergency-contact', 'operator-dashboard', 'operator-settings', 'admin-panel'].includes(prev.currentScreen);
+          return enZonaPrivada
+            ? { ...prev, auth: { ...prev.auth, isLoggedIn: false }, currentScreen: 'auth-welcome' }
+            : prev;
+        });
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // ── Ubicación real en vivo mientras el mapa está visible ─────────
+  // Solo si el permiso ya fue concedido (no vuelve a preguntar) y se
+  // detiene al salir del mapa para ahorrar batería.
+  useEffect(() => {
+    if (appState.currentScreen !== 'main-map') return;
+    let stop: (() => void) | undefined;
+    let cancelled = false;
+    hasLocationPermission().then(async (granted) => {
+      if (!granted || cancelled) return;
+      stop = await watchLocation(
+        (c) => setAppState(prev => ({ ...prev, userLocation: { lat: c.lat, lng: c.lng } })),
+        (err) => console.warn('Seguimiento de ubicación:', err.message),
+      );
+      if (cancelled) stop();
+    }).catch(() => undefined);
+    return () => { cancelled = true; stop?.(); };
+  }, [appState.currentScreen]);
+
+  // ── Notificaciones push (Android, cuando Firebase está configurado) ──
+  const pushRegistered = useRef(false);
+  useEffect(() => {
+    const enSesion = ['main-map', 'operator-dashboard', 'admin-panel'].includes(appState.currentScreen);
+    if (!enSesion || pushRegistered.current) return;
+    pushRegistered.current = true;
+    registerForPush((data) => {
+      if (data.alert_id) {
+        setAppState(prev => ({ ...prev, selectedAlertId: String(data.alert_id), currentScreen: 'alert-detail' }));
+      }
+    }).catch(err => console.warn('Push no disponible:', err));
+  }, [appState.currentScreen]);
+
   // ── Helpers de navegación y estado ──────────────────────────────
   const navigateToScreen = (screen: Screen) => {
     setAppState(prev => ({ ...prev, currentScreen: screen }));
@@ -240,92 +387,84 @@ export default function App() {
     files:       File[] = []
   ): Promise<void> => {
 
-    if (!appState.userLocation) {
-      toast.error('Ubicación no disponible', {
-        description: 'Activa la ubicación de tu dispositivo para enviar una alerta.',
-      });
-      return;
+    // 1. Ubicación fresca del GPS en el momento del SOS. Si no se puede
+    //    obtener, se usa la última conocida (o la zona elegida manualmente).
+    let location = appState.userLocation;
+    try {
+      const fresh = await getCurrentLocation({ highAccuracy: true, timeoutMs: 8_000, maxAgeMs: 30_000 });
+      location = { lat: fresh.lat, lng: fresh.lng };
+      setAppState(prev => ({ ...prev, userLocation: location }));
+    } catch (err) {
+      console.warn('No se obtuvo ubicación fresca, se usa la última conocida:', err);
     }
 
-    const location = appState.userLocation;
-    const tempId   = `local_${Date.now()}`;
+    if (!location) {
+      // AlarmSheet muestra este error y mantiene el formulario para reintentar
+      throw new Error('Activa la ubicación de tu dispositivo para enviar una alerta.');
+    }
 
-    const alertaLocal: Alert = {
-      id:          tempId,
+    // 2. Guardar en la BD. Solo se confirma al usuario cuando el servidor
+    //    respondió; si falla, el error llega a AlarmSheet para reintentar.
+    const alertaCreada = await createAlertDB({
+      type_code:   type,
+      lat:         location.lat,
+      lng:         location.lng,
+      description: description || undefined,
+      media_urls:  [],
+    });
+
+    const alertaGuardada: Alert = {
+      id:          alertaCreada.id,
       type,
       location,
-      timestamp:   new Date(),
+      timestamp:   new Date(alertaCreada.created_at),
       description: description || undefined,
       mediaUrls:   [],
       status:      'open',
     };
 
-    // Navegar a confirmación inmediatamente (UX fluida)
     setAppState(prev => ({
       ...prev,
-      alerts:           [alertaLocal, ...prev.alerts],
-      areaAlerts:       [alertaLocal, ...prev.areaAlerts],
-      lastCreatedAlert: alertaLocal,
+      alerts:           [alertaGuardada, ...prev.alerts.filter(a => a.id !== alertaGuardada.id)],
+      areaAlerts:       [alertaGuardada, ...prev.areaAlerts.filter(a => a.id !== alertaGuardada.id)],
+      lastCreatedAlert: alertaGuardada,
       currentScreen:    'alert-confirmation',
     }));
 
+    // 3. Evidencias: se suben después de confirmar la alerta, para no
+    //    retrasar el SOS. Un fallo aquí no invalida la alerta.
+    if (files.length === 0) return;
+
     try {
-      const alertaCreada = await createAlertDB({
-        type_code:   type,
-        lat:         location.lat,
-        lng:         location.lng,
-        description: description || undefined,
-        media_urls:  [],
+      toast.info('Subiendo evidencia...', {
+        description: `${files.length} archivo${files.length > 1 ? 's' : ''}`,
       });
 
-      console.log('✅ Alerta creada en BD:', alertaCreada.id);
+      const uploadResult = await uploadMultipleFiles(files, alertaCreada.id);
 
-      let mediaUrls: string[] = [];
-
-      if (files.length > 0) {
-        toast.info('Subiendo evidencia...', {
-          description: `${files.length} archivo${files.length > 1 ? 's' : ''}`,
+      if (uploadResult.urls.length > 0) {
+        const mediaUrls = uploadResult.urls;
+        await updateAlertMediaUrls(alertaCreada.id, mediaUrls);
+        const conEvidencia = { ...alertaGuardada, mediaUrls };
+        setAppState(prev => ({
+          ...prev,
+          lastCreatedAlert: prev.lastCreatedAlert?.id === conEvidencia.id ? conEvidencia : prev.lastCreatedAlert,
+          alerts:     prev.alerts.map(a => a.id === conEvidencia.id ? conEvidencia : a),
+          areaAlerts: prev.areaAlerts.map(a => a.id === conEvidencia.id ? conEvidencia : a),
+        }));
+        toast.success('Evidencia guardada', {
+          description: `${mediaUrls.length} archivo${mediaUrls.length > 1 ? 's' : ''} adjunto${mediaUrls.length > 1 ? 's' : ''}`,
         });
-
-        const uploadResult = await uploadMultipleFiles(files, alertaCreada.id);
-
-        if (uploadResult.urls.length > 0) {
-          mediaUrls = uploadResult.urls;
-          await updateAlertMediaUrls(alertaCreada.id, mediaUrls);
-          console.log('✅ media_urls actualizados:', mediaUrls);
-          toast.success('Evidencia guardada', {
-            description: `${mediaUrls.length} archivo${mediaUrls.length > 1 ? 's' : ''} adjunto${mediaUrls.length > 1 ? 's' : ''}`,
-          });
-        }
-
-        if (uploadResult.errors.length > 0) {
-          toast.warning('Algunos archivos no se pudieron subir', {
-            description: uploadResult.errors.join(', '),
-          });
-        }
       }
 
-      const alertaFinal: Alert = {
-        id:          alertaCreada.id,
-        type,
-        location,
-        timestamp:   new Date(alertaCreada.created_at),
-        description: description || undefined,
-        mediaUrls,
-        status:      'open',
-      };
-
-      // Reemplazar el ID temporal en ambas listas
-      setAppState(prev => ({
-        ...prev,
-        lastCreatedAlert: alertaFinal,
-        alerts:     prev.alerts.map(a => a.id === tempId ? alertaFinal : a),
-        areaAlerts: prev.areaAlerts.map(a => a.id === tempId ? alertaFinal : a),
-      }));
-
+      if (uploadResult.errors.length > 0) {
+        toast.warning('Algunos archivos no se pudieron subir', {
+          description: uploadResult.errors.join(', '),
+        });
+      }
     } catch (error: any) {
-      console.error('❌ Error creando alerta:', error);
-      toast.error('Alerta mostrada localmente, pero falló al guardar en la base de datos', {
+      console.error('Error subiendo evidencias:', error);
+      toast.warning('La alerta se envió, pero la evidencia no se pudo adjuntar', {
         description: error.message,
       });
     }
@@ -360,18 +499,18 @@ export default function App() {
   // HANDLERS DE AUTENTICACIÓN
   // ================================================================
 
-  const handleLogin = (email: string, password: string, userName: string) => {
+  const handleLogin = (email: string, _password: string, userName: string) => {
     updateAppState({
       user: { ...appState.user, name: userName },
-      auth: { ...appState.auth, isLoggedIn: true, email, password },
+      auth: { ...appState.auth, isLoggedIn: true, email, password: '' },
     });
     navigateToScreen('location-permission');
   };
 
-  const handleRegister = (name: string, email: string, password: string) => {
+  const handleRegister = (name: string, email: string, _password: string) => {
     updateAppState({
       user: { ...appState.user, name },
-      auth: { ...appState.auth, email, password },
+      auth: { ...appState.auth, email, password: '' },
     });
     navigateToScreen('data-consent');
   };
@@ -386,7 +525,13 @@ export default function App() {
     navigateToScreen('otp-verification');
   };
 
-  const handleLogout = () => {
+  // Cierre de sesión real: borra el token push del dispositivo, cierra la
+  // sesión en Supabase (antes solo cambiaba de pantalla) y limpia el estado.
+  const handleLogout = async () => {
+    try { await unregisterPush(); } catch { /* sin push */ }
+    try { await cerrarSesion(); } catch (err) { console.warn('Error al cerrar sesión:', err); }
+    ['admin_user', 'admin_profile', 'admin_token', 'admin_access_token'].forEach(k => localStorage.removeItem(k));
+    pushRegistered.current = false;
     updateAppState({
       auth:            { isLoggedIn: false, email: '', password: '', resetEmail: '' },
       user:            { name: '', hasLocationPermission: false, hasCompletedOnboarding: false },
@@ -395,8 +540,8 @@ export default function App() {
       areaAlerts:      [],
       selectedAlertId: null,
       onboardingStep:  0,
+      currentScreen:   'auth-welcome',
     });
-    navigateToScreen('welcome');
   };
 
   // ================================================================
@@ -419,6 +564,7 @@ export default function App() {
         return (
           <OnboardingScreen
             step={appState.onboardingStep}
+            onSkip={() => navigateToScreen('auth-welcome')}
             onNext={() => {
               if (appState.onboardingStep < 2) {
                 updateAppState({ onboardingStep: appState.onboardingStep + 1 });
@@ -452,15 +598,7 @@ export default function App() {
             onLogin={handleLogin}
             onNavigateToRegister={() => navigateToScreen('register')}
             onNavigateToForgotPassword={() => navigateToScreen('forgot-password')}
-            onNavigateToCollaboratorPanel={(role: string) => {
-              if (role === 'admin') {
-                navigateToScreen('admin-panel');
-              } else if (role === 'operator' || role === 'auditor') {
-                navigateToScreen('operator-dashboard');
-              } else {
-                navigateToScreen('auth-welcome');
-              }
-            }}
+            onNavigateToCollaboratorPanel={() => navigateToScreen('operator-login')}
           />
         );
 
@@ -690,12 +828,7 @@ export default function App() {
         return (
           <OperatorDashboard
             onNavigateToSettings={() => navigateToScreen('operator-settings')}
-            onLogout={() => {
-              localStorage.removeItem('admin_user');
-              localStorage.removeItem('admin_profile');
-              localStorage.removeItem('admin_access_token');
-              navigateToScreen('welcome');
-            }}
+            onLogout={handleLogout}
             accessToken={localStorage.getItem('admin_access_token') || undefined}
           />
         );
@@ -711,13 +844,7 @@ export default function App() {
       case 'admin-panel':
         return (
           <AdminPanel
-            onLogout={() => {
-              localStorage.removeItem('admin_user');
-              localStorage.removeItem('admin_profile');
-              localStorage.removeItem('admin_token');
-              localStorage.removeItem('admin_access_token');
-              navigateToScreen('welcome');
-            }}
+            onLogout={handleLogout}
           />
         );
 
@@ -725,6 +852,15 @@ export default function App() {
         return <WelcomeScreen onNext={() => navigateToScreen('onboarding')} />;
     }
   };
+
+  if (restoringSession) {
+    return (
+      <div className="h-screen w-full flex flex-col items-center justify-center bg-white gap-3">
+        <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm text-gray-500">Cargando…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen w-full bg-gray-100">

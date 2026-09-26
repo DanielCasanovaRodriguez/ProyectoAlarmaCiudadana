@@ -1,3 +1,4 @@
+import L from 'leaflet';
 import React, { useEffect, useRef, useMemo } from 'react';
 import { Alert } from '../App';
 
@@ -11,9 +12,6 @@ interface MapViewProps {
   userLocation:      { lat: number; lng: number } | null;
 }
 
-declare global {
-  interface Window { L: any; }
-}
 
 // ================================================================
 // CONFIGURACIÓN DE TIPOS
@@ -146,16 +144,6 @@ export function MapView({ alerts, ownActiveAlertIds, userLocation }: MapViewProp
 
   // ── Inicializar mapa una sola vez ────────────────────────────────
   useEffect(() => {
-    if (!document.getElementById('leaflet-css')) {
-      const link = document.createElement('link');
-      link.id          = 'leaflet-css';
-      link.rel         = 'stylesheet';
-      link.href        = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-      link.integrity   = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=';
-      link.crossOrigin = '';
-      document.head.appendChild(link);
-    }
-
     if (!document.getElementById('map-marker-styles')) {
       const style = document.createElement('style');
       style.id = 'map-marker-styles';
@@ -173,7 +161,6 @@ export function MapView({ alerts, ownActiveAlertIds, userLocation }: MapViewProp
     function initMap() {
       if (!mapRef.current || mapInstanceRef.current) return;
 
-      const L = window.L;
       const center = userLocation
         ? [userLocation.lat, userLocation.lng] as [number, number]
         : BOGOTA_CENTER;
@@ -215,16 +202,7 @@ export function MapView({ alerts, ownActiveAlertIds, userLocation }: MapViewProp
         .bindPopup('<strong>Tu ubicación</strong>');
     }
 
-    if (!window.L) {
-      const script = document.createElement('script');
-      script.src         = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-      script.integrity   = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
-      script.crossOrigin = '';
-      script.onload      = () => initMap();
-      document.head.appendChild(script);
-    } else {
-      initMap();
-    }
+    initMap();
 
     return () => {
       markersRef.current.forEach(m => m.remove());
@@ -234,9 +212,8 @@ export function MapView({ alerts, ownActiveAlertIds, userLocation }: MapViewProp
 
   // ── Mover/crear marcador del usuario cuando cambia su ubicación ──
   useEffect(() => {
-    if (!mapInstanceRef.current || !window.L || !userLocation) return;
+    if (!mapInstanceRef.current || !userLocation) return;
 
-    const L   = window.L;
     const map = mapInstanceRef.current;
 
     if (userMarkerRef.current) {
@@ -260,9 +237,8 @@ export function MapView({ alerts, ownActiveAlertIds, userLocation }: MapViewProp
 
   // ── Actualizar marcadores de alertas del área ────────────────────
   useEffect(() => {
-    if (!mapInstanceRef.current || !window.L) return;
+    if (!mapInstanceRef.current) return;
 
-    const L   = window.L;
     const map = mapInstanceRef.current;
 
     // Set para búsqueda O(1) — creado dentro del efecto para capturar el valor actual

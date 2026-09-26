@@ -62,31 +62,7 @@ export function AdminPanel({ onLogout }: AdminPanelProps = {}) {
     const { data: { session } } = await supabase.auth.getSession();
 
     if (session?.access_token) {
-      // 2. Sesión activa → cargar perfil desde localStorage (ya lo guardó CollaboratorLoginScreen)
-      const savedUser    = localStorage.getItem('admin_user');
-      const savedProfile = localStorage.getItem('admin_profile');
-
-      if (savedUser && savedProfile) {
-        try {
-          const parsedUser    = JSON.parse(savedUser);
-          const parsedProfile = JSON.parse(savedProfile);
-
-          // Verificar que el rol sigue siendo válido
-          if (['admin', 'operator', 'auditor'].includes(parsedProfile?.role)) {
-            setUser(parsedUser);
-            setProfile(parsedProfile);
-            setAccessToken(session.access_token);
-            setAuthenticated(true);
-            setInitializing(false);
-            return;
-          }
-        } catch {
-          // localStorage corrupto → limpiar y redirigir al login
-          clearLocalStorage();
-        }
-      }
-
-      // 3. Hay sesión pero no localStorage → refrescar perfil desde BD
+      // 2. El rol se lee SIEMPRE de la base de datos (localStorage es editable por el usuario)
       await refreshProfileFromDB(session.access_token);
     } else {
       // 4. Sin sesión activa → redirigir al login de colaboradores

@@ -4,6 +4,7 @@ import { Textarea } from './ui/textarea';
 import { Alert } from '../App';
 import { AlertTriangle, Car, Shield, Flame, Users, X } from 'lucide-react';
 import { MediaUpload } from './MediaUpload';
+import { HoldToConfirmButton } from './HoldToConfirmButton';
 import { MediaFile } from '../services/mediaService';
 import { toast } from 'sonner';
 
@@ -242,20 +243,20 @@ export function AlarmSheet({ isOpen, onClose, onCreateAlert }: AlarmSheetProps) 
             >
               Cancelar
             </Button>
-            <Button
-              onClick={handleSubmit}
+            <HoldToConfirmButton
+              onConfirm={handleSubmit}
               disabled={!selectedType || isSubmitting}
               className="flex-1 bg-red-500 hover:bg-red-600 text-white"
             >
               {isSubmitting ? (
-                <span className="flex items-center gap-2">
+                <span className="flex items-center justify-center gap-2">
                   <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                   Enviando...
                 </span>
               ) : (
-                'Enviar Alarma'
+                'Mantén para enviar'
               )}
-            </Button>
+            </HoldToConfirmButton>
           </div>
         </div>
       </div>

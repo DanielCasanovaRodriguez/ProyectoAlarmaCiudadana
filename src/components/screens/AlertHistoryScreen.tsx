@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Alert } from '../../App';
 import { Button } from '../ui/button';
+import { useSignedMediaUrls } from '../../hooks/useSignedMediaUrls';
 import {
   ArrowLeft, AlertTriangle, Car, Shield, Flame, Users,
   Clock, MapPin, Image as ImageIcon, Video, Mic,
@@ -84,6 +85,10 @@ function formatTimeAgo(timestamp: Date): string {
 // ================================================================
 
 export function AlertHistoryScreen({ alerts, onBack, onSelectAlert }: AlertHistoryScreenProps) {
+  // Miniaturas: se firman en un solo lote las 3 primeras evidencias de cada alerta
+  const thumbUrls   = alerts.flatMap(a => (a.mediaUrls ?? []).slice(0, 3));
+  const signedThumbs = useSignedMediaUrls(thumbUrls);
+  const signedOf = (url: string) => signedThumbs[thumbUrls.indexOf(url)] ?? '';
   const [filter, setFilter] = useState<FilterType>('all');
 
   const filteredAlerts = alerts.filter(alert => {
@@ -232,7 +237,7 @@ export function AlertHistoryScreen({ alerts, onBack, onSelectAlert }: AlertHisto
                               >
                                 {isImage(url) ? (
                                   <img
-                                    src={url}
+                                    src={signedOf(url)}
                                     alt={`Evidencia ${i + 1}`}
                                     className="w-full h-full object-cover"
                                     onError={e => {

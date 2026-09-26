@@ -1,0 +1,9 @@
+/** Datos públicos de la aplicación (sin secretos). */
+export const APP_VERSION = '1.1.0';
+
+/**
+ * Descarga del APK de Android: siempre la última versión publicada en
+ * GitHub Releases con el nombre fijo `alerta-ciudadana.apk`.
+ */
+export const ANDROID_APK_URL =
+  'https://github.com/DanielCasanovaRodriguez/ProyectoAlarmaCiudadana/releases/latest/download/alerta-ciudadana.apk';

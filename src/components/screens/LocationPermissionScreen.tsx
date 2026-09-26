@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Button } from '../ui/button';
 import { MapPin, Shield, AlertTriangle, Navigation, Settings, X } from 'lucide-react';
+import { getCurrentLocation, LocationError, isNative } from '../../platform';
 
 interface LocationPermissionScreenProps {
   onLocationGranted: (coords: { lat: number; lng: number }) => void;
@@ -27,42 +28,38 @@ export function LocationPermissionScreen({
   const [loading, setLoading]   = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
 
-  // Pedir ubicación real al navegador
-  const handleRequestPermission = () => {
+  const [reason, setReason] = useState<string>('');
+
+  // Pedir ubicación real (navegador en web, GPS nativo en Android)
+  const handleRequestPermission = async () => {
     setLoading(true);
-
-    if (!navigator.geolocation) {
-      setLoading(false);
+    try {
+      const coords = await getCurrentLocation({ highAccuracy: true, timeoutMs: 15_000 });
+      onLocationGranted({ lat: coords.lat, lng: coords.lng });
+    } catch (err) {
+      console.warn('Ubicación no disponible:', err);
+      setReason(err instanceof LocationError ? err.message : '');
       setStep('denied');
-      return;
+    } finally {
+      setLoading(false);
     }
-
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setLoading(false);
-        onLocationGranted({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-        });
-      },
-      (err) => {
-        setLoading(false);
-        console.warn('Permiso denegado o error:', err.message);
-        setStep('denied');
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
   };
 
-  // Ir a configuración del dispositivo
+  // Cómo activar la ubicación según la plataforma
   const handleOpenSettings = () => {
     alert(
-      'Para activar la ubicación:\n\n' +
-      '• Chrome: haz clic en el candado 🔒 en la barra de direcciones → Ubicación → Permitir\n' +
-      '• Firefox: haz clic en el candado 🔒 → Más información → Permisos → Ubicación\n' +
-      '• Edge: haz clic en el candado 🔒 → Permisos para este sitio → Ubicación\n\n' +
-      'Luego recarga la página e intenta de nuevo.'
+      isNative
+        ? 'Para activar la ubicación:\n\n' +
+          '1. Abre Ajustes del teléfono > Apps > Alerta Ciudadana > Permisos > Ubicación > Permitir mientras se usa la app.\n' +
+          '2. Verifica que la Ubicación del dispositivo esté encendida (panel de ajustes rápidos).\n\n' +
+          'Luego vuelve a la app e intenta de nuevo.'
+        : 'Para activar la ubicación:\n\n' +
+          '• Chrome: haz clic en el candado 🔒 en la barra de direcciones → Ubicación → Permitir\n' +
+          '• Firefox: haz clic en el candado 🔒 → Más información → Permisos → Ubicación\n' +
+          '• Edge: haz clic en el candado 🔒 → Permisos para este sitio → Ubicación\n\n' +
+          'Luego recarga la página e intenta de nuevo.'
     );
+    setStep('request');
   };
 
   // Confirmar zona seleccionada manualmente
@@ -157,8 +154,8 @@ export function LocationPermissionScreen({
           Ubicación no disponible
         </h1>
         <p className="text-gray-500 text-center text-sm max-w-sm mb-8 leading-relaxed">
-          Sin ubicación precisa, las alertas serán más difíciles de atender.
-          Elige una opción para continuar:
+          {reason || 'Sin ubicación precisa, las alertas serán más difíciles de atender.'}
+          {' '}Elige una opción para continuar:
         </p>
 
         {/* Opción 1: Activar en configuración */}
@@ -172,7 +169,7 @@ export function LocationPermissionScreen({
             </div>
             <div>
               <p className="text-sm font-semibold text-gray-800">Activar en configuración</p>
-              <p className="text-xs text-gray-500">Te mostramos cómo habilitarla en tu navegador</p>
+              <p className="text-xs text-gray-500">{isNative ? 'Te mostramos cómo habilitarla en tu teléfono' : 'Te mostramos cómo habilitarla en tu navegador'}</p>
             </div>
           </div>
         </button>

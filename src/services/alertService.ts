@@ -1,5 +1,6 @@
 import { supabase } from '../utils/supabase/client';
 import type { Database } from '../types/database.types';
+import { isMissingRpc } from './rpc';
 
 // ================================================================
 // TIPOS
@@ -120,6 +121,14 @@ export async function updateAlertMediaUrls(
 // ================================================================
 
 export async function getActiveAlerts(): Promise<Alert[]> {
+  // Función del servidor: no expone user_id (protege a quien reporta).
+  const { data: rpcData, error: rpcError } = await supabase.rpc('alertas_activas_publicas');
+  if (!rpcError) {
+    return (rpcData ?? []).map(r => ({ ...r, user_id: '', anonimo: true } as Alert));
+  }
+  if (!isMissingRpc(rpcError)) throw new Error(rpcError.message);
+
+  // Respaldo mientras la migración no esté aplicada
   const { data, error } = await supabase
     .from('alerts')
     .select('*')
@@ -185,7 +194,15 @@ export async function getAlertTypes(): Promise<AlertType[]> {
 export async function updateAlertStatus(
   alertId:   string,
   newStatus: Alert['status'],
+  note?:     string,
 ) {
+  // Función del servidor: valida permisos y transición, registra historial y auditoría.
+  const { data: rpcData, error: rpcError } = await supabase
+    .rpc('cambiar_estado_alerta', { p_alert_id: alertId, p_nuevo: newStatus, p_nota: note ?? null });
+  if (!rpcError) return rpcData;
+  if (!isMissingRpc(rpcError)) throw new Error(rpcError.message);
+
+  // Respaldo mientras la migración no esté aplicada
   const updateData: Database['public']['Tables']['alerts']['Update'] = {
     status:     newStatus,
     updated_at: new Date().toISOString(),
@@ -250,6 +267,12 @@ export async function cancelAlert(alertId: string): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Debes iniciar sesión.');
 
+  // Función del servidor: valida titularidad y estado y registra el historial.
+  const { error: rpcError } = await supabase.rpc('cancelar_alerta', { p_alert_id: alertId });
+  if (!rpcError) return;
+  if (!isMissingRpc(rpcError)) throw new Error(rpcError.message);
+
+  // Respaldo mientras la migración no esté aplicada
   // Verificar titularidad y estado antes de cancelar
   const { data: alerta, error: fetchError } = await supabase
     .from('alerts')
@@ -297,30 +320,6 @@ export async function cancelAlert(alertId: string): Promise<void> {
     // Silencioso: si hay un trigger en BD que ya lo registra, este insert
     // puede fallar por duplicado y eso es aceptable.
   }
-}
-
-// ================================================================
-// Guardar alerta offline en cola de sincronización
-// ================================================================
-
-export async function saveAlertOffline(data: CreateAlertData): Promise<string> {
-  const tempId     = crypto.randomUUID();
-  const hashEvento = btoa(JSON.stringify({
-    type_code: data.type_code,
-    lat:       data.lat.toFixed(4),
-    lng:       data.lng.toFixed(4),
-    ts:        Math.floor(Date.now() / 60000),
-  }));
-
-  await supabase
-    .from('cola_sincronizacion')
-    .insert({
-      payload:     { ...data, tempId, timestamp: new Date().toISOString() },
-      estado:      'pendiente',
-      hash_evento: hashEvento,
-    });
-
-  return tempId;
 }
 
 // ================================================================

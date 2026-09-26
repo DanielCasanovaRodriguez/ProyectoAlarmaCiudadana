@@ -372,7 +372,29 @@ export interface Database {
     // Sin estos, todas las tablas resuelven como tipo 'never'
     // ----------------------------------------------------------------
     Views:          Record<string, never>;
-    Functions:      Record<string, never>;
+    // RPC definidas en supabase/migrations/20260925000001_funciones_negocio.sql
+    Functions: {
+      alertas_activas_publicas: {
+        Args: Record<string, never>;
+        Returns: {
+          id: string; type_code: string; description: string | null; severity: number;
+          lat: number; lng: number; status: AlertStatus; media_urls: string[];
+          created_at: string; updated_at: string; resolved_at: string | null; es_propia: boolean;
+        }[];
+      };
+      cambiar_estado_alerta: {
+        Args: { p_alert_id: string; p_nuevo: AlertStatus; p_nota?: string | null };
+        Returns: Database['public']['Tables']['alerts']['Row'];
+      };
+      cancelar_alerta: {
+        Args: { p_alert_id: string };
+        Returns: Database['public']['Tables']['alerts']['Row'];
+      };
+      rol_actual:     { Args: Record<string, never>; Returns: string | null };
+      es_admin:       { Args: Record<string, never>; Returns: boolean };
+      es_staff:       { Args: Record<string, never>; Returns: boolean };
+      es_colaborador: { Args: Record<string, never>; Returns: boolean };
+    };
     Enums:          Record<string, never>;
     CompositeTypes: Record<string, never>;
   };
