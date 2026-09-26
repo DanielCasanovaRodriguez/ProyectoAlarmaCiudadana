@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Alert } from '../../App';
 import { Button } from '../ui/button';
+import { EvidenceImage } from '../EvidenceImage';
 import { useSignedMediaUrls } from '../../hooks/useSignedMediaUrls';
 import {
   ArrowLeft, AlertTriangle, Car, Shield, Flame, Users,
@@ -236,14 +237,7 @@ export function AlertHistoryScreen({ alerts, onBack, onSelectAlert }: AlertHisto
                                 className="w-9 h-9 rounded-md overflow-hidden bg-gray-100 border border-gray-200 flex-shrink-0"
                               >
                                 {isImage(url) ? (
-                                  <img
-                                    src={signedOf(url)}
-                                    alt={`Evidencia ${i + 1}`}
-                                    className="w-full h-full object-cover"
-                                    onError={e => {
-                                      (e.target as HTMLImageElement).style.display = 'none';
-                                    }}
-                                  />
+                                  <EvidenceImage src={signedOf(url)} alt={`Evidencia ${i + 1}`} compact />
                                 ) : (
                                   <div className="w-full h-full flex items-center justify-center">
                                     <MediaIcon className="w-3.5 h-3.5 text-gray-400" />

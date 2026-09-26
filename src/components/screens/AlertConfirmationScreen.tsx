@@ -1,6 +1,7 @@
 import React from 'react';
 import { Alert } from '../../App';
 import { Button } from '../ui/button';
+import { EvidenceImage } from '../EvidenceImage';
 import { useSignedMediaUrls } from '../../hooks/useSignedMediaUrls';
 import {
   CheckCircle, MapPin, Clock,
@@ -116,15 +117,7 @@ export function AlertConfirmationScreen({
                   className="aspect-square rounded-xl overflow-hidden bg-gray-100 border border-gray-200"
                 >
                   {isImage(url) ? (
-                    <img
-                      src={signedMedia[index] ?? ''}
-                      alt={`Evidencia ${index + 1}`}
-                      className="w-full h-full object-cover"
-                      onError={e => {
-                        // Si la imagen falla, mostrar ícono
-                        (e.target as HTMLImageElement).style.display = 'none';
-                      }}
-                    />
+                    <EvidenceImage src={signedMedia[index]} alt={`Evidencia ${index + 1}`} />
                   ) : (
                     <div className="w-full h-full flex flex-col items-center justify-center gap-1">
                       <MediaIcon className="w-6 h-6 text-gray-400" />

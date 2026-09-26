@@ -113,6 +113,62 @@ export function revokePreviewUrl(url: string): void {
 }
 
 // ==========================================
+// COMPRESIÓN DE IMÁGENES
+// ==========================================
+
+const MIME_EXT: Record<string, string> = {
+  'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/heic': 'heic',
+  'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov',
+  'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/wav': 'wav', 'audio/webm': 'webm', 'audio/ogg': 'ogg',
+};
+
+function extensionFor(file: File): string {
+  const fromMime = MIME_EXT[file.type];
+  if (fromMime) return fromMime;
+  const fromName = file.name.includes('.') ? file.name.split('.').pop()!.toLowerCase() : '';
+  return /^[a-z0-9]{2,5}$/.test(fromName) ? fromName : 'bin';
+}
+
+const COMPRESS_THRESHOLD = 1024 * 1024; // comprimir si pesa más de 1 MB
+const MAX_DIMENSION      = 1920;
+const JPEG_QUALITY       = 0.82;
+
+/**
+ * Reduce fotos grandes a máx. 1920 px en JPEG (respetando la orientación
+ * EXIF). Si el formato no se puede decodificar (p. ej. HEIC) o el
+ * resultado no es más liviano, se devuelve el archivo original.
+ */
+export async function compressImageIfNeeded(file: File): Promise<File> {
+  const esImagenComprimible = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(file.type);
+  if (!esImagenComprimible || file.size <= COMPRESS_THRESHOLD || typeof createImageBitmap !== 'function') {
+    return file;
+  }
+  try {
+    const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const scale  = Math.min(1, MAX_DIMENSION / Math.max(bitmap.width, bitmap.height));
+    const width  = Math.round(bitmap.width * scale);
+    const height = Math.round(bitmap.height * scale);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width; canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return file;
+    ctx.drawImage(bitmap, 0, 0, width, height);
+    bitmap.close();
+
+    const blob = await new Promise<Blob | null>(res => canvas.toBlob(res, 'image/jpeg', JPEG_QUALITY));
+    if (!blob || blob.size >= file.size) return file;
+
+    const base = file.name.replace(/\.[^.]+$/, '') || 'foto';
+    console.log(`🗜️ Imagen reducida: ${(file.size / 1048576).toFixed(1)} MB → ${(blob.size / 1048576).toFixed(2)} MB`);
+    return new File([blob], `${base}.jpg`, { type: 'image/jpeg', lastModified: file.lastModified });
+  } catch (err) {
+    console.warn('No se pudo comprimir la imagen; se sube el original:', err);
+    return file;
+  }
+}
+
+// ==========================================
 // UPLOAD
 // ==========================================
 
@@ -139,10 +195,14 @@ export async function uploadFile(
 
     const supabase = createClient();
 
-    // Generar nombre único
+    // Fotos de cámara (~3 MB) se reducen antes de subir
+    file = await compressImageIfNeeded(file);
+
+    // Nombre único; la extensión sale del tipo MIME (en Android algunas
+    // fotos llegan sin extensión en el nombre)
     const timestamp = Date.now();
     const randomStr = Math.random().toString(36).substring(2, 8);
-    const fileExt = file.name.split('.').pop();
+    const fileExt = extensionFor(file);
     const fileName = `${timestamp}-${randomStr}.${fileExt}`;
 
     // Path en storage: alertas/{alertId}/{fileName}
