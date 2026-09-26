@@ -11,6 +11,7 @@ import { Badge } from '../../ui/badge';
 import { Skeleton } from '../../ui/skeleton';
 import { generateReport, downloadCSV, getAlertById, printAlertPDF } from '../../../services/adminService';
 import type { AdminAlert } from '../../../services/adminService';
+import { useSignedMediaUrls } from '../../../hooks/useSignedMediaUrls';
 import { toast } from 'sonner';
 
 interface AdminReportsScreenProps {
@@ -55,6 +56,7 @@ export function AdminReportsScreen({ accessToken }: AdminReportsScreenProps) {
   const [alertIdInput, setAlertIdInput] = useState('');
   const [searching,    setSearching]    = useState(false);
   const [foundAlert,   setFoundAlert]   = useState<AdminAlert | null>(null);
+  const signedFound = useSignedMediaUrls(foundAlert?.mediaUrls);
   const [alertError,   setAlertError]   = useState('');
 
   // ── Generación de reporte general ─────────────────────────────
@@ -342,9 +344,9 @@ export function AdminReportsScreen({ accessToken }: AdminReportsScreenProps) {
                       </p>
                       <div className="space-y-1">
                         {foundAlert.mediaUrls.map((url, i) => (
-                          <a key={i} href={url} target="_blank" rel="noopener noreferrer"
+                          <a key={i} href={signedFound[i] ?? '#'} target="_blank" rel="noopener noreferrer"
                             className="block text-blue-600 text-xs hover:underline truncate">
-                            {url}
+                            {url.split('/').pop()}
                           </a>
                         ))}
                       </div>

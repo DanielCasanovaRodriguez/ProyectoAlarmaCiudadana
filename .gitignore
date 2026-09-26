@@ -24,3 +24,13 @@ npm-debug.log*
 Thumbs.db
 # Build antiguo
 build/
+
+# Android: secretos y firmas (nunca versionar)
+android/app/google-services.json
+*.jks
+*.keystore
+keystore.properties
+
+# Resultados de auditoría con datos reales
+supabase/audit/resultados/
+supabase/.temp/

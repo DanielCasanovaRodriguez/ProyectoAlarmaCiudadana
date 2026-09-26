@@ -1,5 +1,6 @@
 import { supabase } from '../utils/supabase/client';
 import type { AlertStatus } from '../types/database.types';
+import { isMissingRpc } from './rpc';
 import type { Incident, TimelineEntry, Filters, Severity, IncidentType, Unit } from '../components/operator/types';
 
 // ================================================================
@@ -101,6 +102,13 @@ export async function updateIncidentStatus(
   note?:      string,
 ): Promise<{ error: string | null }> {
   try {
+    // Función del servidor: valida permisos y transición, registra historial y auditoría.
+    const { error: rpcError } = await supabase
+      .rpc('cambiar_estado_alerta', { p_alert_id: incidentId, p_nuevo: newStatus, p_nota: note?.trim() || null });
+    if (!rpcError) return { error: null };
+    if (!isMissingRpc(rpcError)) return { error: rpcError.message };
+
+    // Respaldo mientras la migración no esté aplicada
     const updates: any = {
       status:     newStatus,
       updated_at: new Date().toISOString(),

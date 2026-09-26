@@ -180,16 +180,13 @@ export async function uploadFile(
       onProgress(100);
     }
 
-    // Obtener URL pública
-    const { data: urlData } = supabase.storage
-      .from(STORAGE_BUCKET)
-      .getPublicUrl(filePath);
-
-    console.log('✅ Archivo subido exitosamente:', urlData.publicUrl);
+    // Se guarda la ruta interna (no una URL pública): las evidencias se
+    // muestran con URLs firmadas temporales (ver getSignedMediaUrls).
+    console.log('✅ Archivo subido exitosamente:', filePath);
 
     return {
       success: true,
-      url: urlData.publicUrl
+      url: filePath
     };
   } catch (error: any) {
     console.error('❌ Error inesperado al subir archivo:', error);
@@ -245,16 +242,13 @@ export async function deleteFile(fileUrl: string): Promise<{ success: boolean; e
   try {
     const supabase = createClient();
 
-    // Extraer path del URL
-    const urlParts = fileUrl.split('/storage/v1/object/public/evidencias/');
-    if (urlParts.length < 2) {
+    const filePath = toStoragePath(fileUrl);
+    if (!filePath) {
       return {
         success: false,
         error: 'URL inválida'
       };
     }
-
-    const filePath = urlParts[1];
 
     console.log('🗑️ Eliminando archivo:', filePath);
 
@@ -280,6 +274,61 @@ export async function deleteFile(fileUrl: string): Promise<{ success: boolean; e
       error: error.message
     };
   }
+}
+
+// ==========================================
+// URLs FIRMADAS (evidencias privadas)
+// ==========================================
+
+const SIGNED_URL_TTL_SECONDS = 60 * 60; // 1 hora
+
+/**
+ * Convierte un valor de media_urls en la ruta dentro del bucket.
+ * Acepta la ruta nueva ("alertas/<id>/<archivo>") y las URLs públicas
+ * antiguas ("https://.../storage/v1/object/public/evidencias/alertas/...").
+ */
+export function toStoragePath(value: string): string | null {
+  if (!value) return null;
+  if (!/^https?:\/\//i.test(value)) return value.replace(/^\/+/, '');
+  const marker = `/object/public/${STORAGE_BUCKET}/`;
+  const i = value.indexOf(marker);
+  if (i !== -1) return decodeURIComponent(value.slice(i + marker.length).split('?')[0]);
+  const signMarker = `/object/sign/${STORAGE_BUCKET}/`;
+  const j = value.indexOf(signMarker);
+  if (j !== -1) return decodeURIComponent(value.slice(j + signMarker.length).split('?')[0]);
+  return null;
+}
+
+/**
+ * Devuelve URLs firmadas temporales para mostrar evidencias.
+ * Funciona con el bucket público (estado actual) y privado (tras aplicar
+ * supabase/migrations/20260925000003_storage_evidencias.sql).
+ * Si un valor no es del bucket, se devuelve tal cual.
+ */
+export async function getSignedMediaUrls(values: string[]): Promise<string[]> {
+  if (!values?.length) return [];
+  const paths = values.map(toStoragePath);
+  const toSign = paths.filter((p): p is string => !!p);
+  if (toSign.length === 0) return values;
+
+  const { data, error } = await createClient().storage
+    .from(STORAGE_BUCKET)
+    .createSignedUrls(toSign, SIGNED_URL_TTL_SECONDS);
+
+  if (error || !data) {
+    console.warn('No se pudieron firmar las URLs de evidencias:', error?.message);
+    return values;
+  }
+  const byPath = new Map(data.map(d => [d.path, d.signedUrl]));
+  return values.map((v, i) => (paths[i] && byPath.get(paths[i]!)) || v);
+}
+
+/** Tipo de evidencia a partir de la ruta/URL (para elegir img/video/audio). */
+export function mediaKindFromUrl(url: string): MediaType {
+  const clean = url.split('?')[0].toLowerCase();
+  if (/\.(mp4|webm|mov|quicktime)$/.test(clean)) return 'video';
+  if (/\.(mp3|wav|ogg|m4a|mpeg)$/.test(clean)) return 'audio';
+  return 'image';
 }
 
 // ==========================================

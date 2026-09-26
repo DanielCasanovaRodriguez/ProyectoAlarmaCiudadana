@@ -186,31 +186,6 @@ export async function verificarSesion() {
 }
 
 // ================================================================
-// Registrar intento fallido de login
-// ================================================================
-export async function registrarIntentoFallido(userId: string) {
-  const { data: perfil } = await supabase
-    .from('profiles')
-    .select('intentos_fallidos')
-    .eq('id', userId)
-    .single();
-
-  if (!perfil) return;
-
-  const nuevosIntentos = (perfil.intentos_fallidos ?? 0) + 1;
-  const bloquear       = nuevosIntentos >= 5;
-
-  const updateData: Database['public']['Tables']['profiles']['Update'] = {
-    intentos_fallidos: nuevosIntentos,
-    bloqueado_hasta:   bloquear
-      ? new Date(Date.now() + 15 * 60 * 1000).toISOString()
-      : null,
-  };
-
-  await supabase.from('profiles').update(updateData).eq('id', userId);
-}
-
-// ================================================================
 // completeRegistration
 // ================================================================
 export async function completeRegistration(_email: string) {

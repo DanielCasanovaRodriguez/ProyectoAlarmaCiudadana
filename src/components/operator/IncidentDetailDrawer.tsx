@@ -18,6 +18,7 @@ import {
   assignUnitToIncident,
   getIncidentTimeline,
 } from '../../services/incidentService';
+import { useSignedMediaUrls } from '../../hooks/useSignedMediaUrls';
 import { toast } from 'sonner';
 
 interface IncidentDetailDrawerProps {
@@ -35,6 +36,7 @@ export function IncidentDetailDrawer({
   onClose,
   onIncidentUpdate,
 }: IncidentDetailDrawerProps) {
+  const signedMedia = useSignedMediaUrls(incident?.mediaUrls);
   const [selectedUnit,  setSelectedUnit]  = useState(incident.unitName ?? '');
   const [note,          setNote]          = useState('');
   const [msgTemplate,   setMsgTemplate]   = useState('');
@@ -234,7 +236,7 @@ export function IncidentDetailDrawer({
               <p className="text-xs text-gray-400 uppercase font-semibold mb-2">Evidencias ({incident.mediaUrls.length})</p>
               <div className="flex gap-2 flex-wrap">
                 {incident.mediaUrls.map((url, i) => (
-                  <a key={i} href={url} target="_blank" rel="noopener noreferrer"
+                  <a key={i} href={signedMedia[i] ?? '#'} target="_blank" rel="noopener noreferrer"
                      className="text-xs text-blue-600 underline truncate max-w-[200px]">
                     Archivo {i + 1}
                   </a>
