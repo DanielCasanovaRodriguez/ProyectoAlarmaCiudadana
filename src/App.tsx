@@ -34,7 +34,7 @@ import {
 } from './services/alertService.ts';
 import { completeRegistration, sendPasswordResetOTP } from './services/authService.ts';
 import { uploadMultipleFiles } from './services/mediaService';
-import { getCurrentLocation, initNativeShell } from './platform';
+import { getCurrentLocation, initNativeShell, registerForPush } from './platform';
 import { supabase } from './utils/supabase/client';
 
 // ================================================================
@@ -261,6 +261,19 @@ export default function App() {
     return () => cleanup?.();
   }, [appState.auth.isLoggedIn]);
 
+  // ── Notificaciones push (Android, cuando Firebase está configurado) ──
+  const pushRegistered = useRef(false);
+  useEffect(() => {
+    const enSesion = ['main-map', 'operator-dashboard', 'admin-panel'].includes(appState.currentScreen);
+    if (!enSesion || pushRegistered.current) return;
+    pushRegistered.current = true;
+    registerForPush((data) => {
+      if (data.alert_id) {
+        setAppState(prev => ({ ...prev, selectedAlertId: String(data.alert_id), currentScreen: 'alert-detail' }));
+      }
+    }).catch(err => console.warn('Push no disponible:', err));
+  }, [appState.currentScreen]);
+
   // ── Helpers de navegación y estado ──────────────────────────────
   const navigateToScreen = (screen: Screen) => {
     setAppState(prev => ({ ...prev, currentScreen: screen }));
@@ -391,18 +404,18 @@ export default function App() {
   // HANDLERS DE AUTENTICACIÓN
   // ================================================================
 
-  const handleLogin = (email: string, password: string, userName: string) => {
+  const handleLogin = (email: string, _password: string, userName: string) => {
     updateAppState({
       user: { ...appState.user, name: userName },
-      auth: { ...appState.auth, isLoggedIn: true, email, password },
+      auth: { ...appState.auth, isLoggedIn: true, email, password: '' },
     });
     navigateToScreen('location-permission');
   };
 
-  const handleRegister = (name: string, email: string, password: string) => {
+  const handleRegister = (name: string, email: string, _password: string) => {
     updateAppState({
       user: { ...appState.user, name },
-      auth: { ...appState.auth, email, password },
+      auth: { ...appState.auth, email, password: '' },
     });
     navigateToScreen('data-consent');
   };
@@ -450,6 +463,7 @@ export default function App() {
         return (
           <OnboardingScreen
             step={appState.onboardingStep}
+            onSkip={() => navigateToScreen('auth-welcome')}
             onNext={() => {
               if (appState.onboardingStep < 2) {
                 updateAppState({ onboardingStep: appState.onboardingStep + 1 });

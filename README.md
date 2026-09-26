@@ -1,7 +1,7 @@
 
-  # Alarma Ciudadana Móvil
+  # Alerta Ciudadana
 
-  This is a code bundle for Alarma Ciudadana Móvil. The original project is available at https://www.figma.com/design/Ibena6hNkfXGb9PNZ2jUqE/Alarma-Ciudadana-M%C3%B3vil.
+  This is a code bundle for Alerta Ciudadana. The original project is available at https://www.figma.com/design/Ibena6hNkfXGb9PNZ2jUqE/Alarma-Ciudadana-M%C3%B3vil.
 
   ## Running the code
 

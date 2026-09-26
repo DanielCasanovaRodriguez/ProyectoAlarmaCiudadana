@@ -102,7 +102,7 @@ export function LoginScreen({
                 // que exige el segundo factor real (OTP de Supabase por correo).
                 await cerrarSesion();
                 toast.info('Acceso de colaborador', {
-                  description: 'Ingresa por "Acceso colaboradores" para completar la verificación de seguridad.',
+                  description: 'Usa el botón "Soy colaborador" para completar la verificación de seguridad.',
                 });
                 setIsLoading(false);
                 onNavigateToCollaboratorPanel(userRole);

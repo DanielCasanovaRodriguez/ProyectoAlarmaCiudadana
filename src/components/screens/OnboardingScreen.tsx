@@ -6,6 +6,7 @@ interface OnboardingScreenProps {
   step: number;
   onNext: () => void;
   onBack: () => void;
+  onSkip: () => void;
 }
 
 const onboardingSteps = [
@@ -29,7 +30,7 @@ const onboardingSteps = [
   }
 ];
 
-export function OnboardingScreen({ step, onNext, onBack }: OnboardingScreenProps) {
+export function OnboardingScreen({ step, onNext, onBack, onSkip }: OnboardingScreenProps) {
   const currentStep = onboardingSteps[step];
   const Icon = currentStep.icon;
 
@@ -60,12 +61,7 @@ export function OnboardingScreen({ step, onNext, onBack }: OnboardingScreenProps
         <Button 
           variant="ghost" 
           size="sm" 
-          onClick={() => {
-            // Skip to the end
-            for (let i = step; i < 2; i++) {
-              onNext();
-            }
-          }}
+          onClick={onSkip}
           className="text-gray-500"
         >
           Saltar

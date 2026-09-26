@@ -13,3 +13,4 @@ export const platform   = Capacitor.getPlatform() as 'web' | 'android' | 'ios';
 export * from './location';
 export * from './device';
 export * from './shell';
+export * from './push';

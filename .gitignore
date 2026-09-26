@@ -34,3 +34,6 @@ keystore.properties
 # Resultados de auditoría con datos reales
 supabase/audit/resultados/
 supabase/.temp/
+
+# Configuración local de herramientas
+.claude/
