@@ -1,4 +1,5 @@
 import { supabase } from '../utils/supabase/client';
+import { toUserMessage } from '../utils/errors';
 import type { Database } from '../types/database.types';
 
 // ================================================================
@@ -31,10 +32,10 @@ export async function getUserProfile(
       .eq('id', user.id)
       .single();
 
-    if (error) return { data: null, error: error.message };
+    if (error) return { data: null, error: toUserMessage(error) };
     return { data, error: null };
   } catch (error: any) {
-    return { data: null, error: error.message };
+    return { data: null, error: toUserMessage(error) };
   }
 }
 
@@ -56,10 +57,10 @@ export async function updateUserProfile(
       .select()
       .single();
 
-    if (error) return { data: null, error: error.message };
+    if (error) return { data: null, error: toUserMessage(error) };
     return { data, error: null };
   } catch (error: any) {
-    return { data: null, error: error.message };
+    return { data: null, error: toUserMessage(error) };
   }
 }
 
@@ -79,10 +80,10 @@ export async function getEmergencyContacts(
       .eq('user_id', user.id)
       .order('created_at', { ascending: true });
 
-    if (error) return { data: null, error: error.message };
+    if (error) return { data: null, error: toUserMessage(error) };
     return { data: data ?? [], error: null };
   } catch (error: any) {
-    return { data: null, error: error.message };
+    return { data: null, error: toUserMessage(error) };
   }
 }
 
@@ -104,7 +105,7 @@ export async function saveEmergencyContacts(
       .delete()
       .eq('user_id', user.id);
 
-    if (deleteError) return { data: null, error: deleteError.message };
+    if (deleteError) return { data: null, error: toUserMessage(deleteError) };
 
     if (contacts.length === 0) return { data: [], error: null };
 
@@ -122,10 +123,10 @@ export async function saveEmergencyContacts(
       .insert(toInsert)
       .select();
 
-    if (error) return { data: null, error: error.message };
+    if (error) return { data: null, error: toUserMessage(error) };
     return { data: data ?? [], error: null };
   } catch (error: any) {
-    return { data: null, error: error.message };
+    return { data: null, error: toUserMessage(error) };
   }
 }
 
@@ -147,10 +148,10 @@ export async function getUserNotifications(): Promise<{
       .order('created_at', { ascending: false })
       .limit(50);
 
-    if (error) return { data: null, error: error.message };
+    if (error) return { data: null, error: toUserMessage(error) };
     return { data: data ?? [], error: null };
   } catch (error: any) {
-    return { data: null, error: error.message };
+    return { data: null, error: toUserMessage(error) };
   }
 }
 
@@ -166,9 +167,9 @@ export async function markNotificationRead(
       .update({ leida: true })
       .eq('id', notifId);
 
-    if (error) return { error: error.message };
+    if (error) return { error: toUserMessage(error) };
     return { error: null };
   } catch (error: any) {
-    return { error: error.message };
+    return { error: toUserMessage(error) };
   }
 }

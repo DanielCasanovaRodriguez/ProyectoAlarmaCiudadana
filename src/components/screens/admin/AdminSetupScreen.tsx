@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { toUserMessage } from '../../../utils/errors';
 import { Shield, CheckCircle2, Loader2, Eye, EyeOff } from 'lucide-react';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
@@ -96,7 +97,7 @@ export function AdminSetupScreen({ onSetupComplete }: AdminSetupScreenProps) {
 
     } catch (err: any) {
       console.error('Error en setup:', err);
-      setError(err.message || 'Error al configurar el administrador');
+      setError(toUserMessage(err, 'Error al configurar el administrador'));
       setLoading(false);
     }
   };

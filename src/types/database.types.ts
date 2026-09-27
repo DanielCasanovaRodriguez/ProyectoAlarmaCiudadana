@@ -13,6 +13,7 @@ export type AlertStatus = 'open' | 'ack' | 'resolved';
 export type UserRole    = 'citizen' | 'operator' | 'admin' | 'auditor';
 export type UserStatus  = 'active' | 'inactive' | 'suspended';
 export type MediaKind   = 'foto' | 'video' | 'audio';
+export type EstadoIdentidad = 'pendiente' | 'verificada' | 'rechazada';
 export type SyncStatus  = 'pendiente' | 'procesando' | 'sincronizado' | 'fallido';
 
 export interface Database {
@@ -26,6 +27,8 @@ export interface Database {
         Row: {
           id:                     string;
           full_name:              string | null;
+          nombres:                string | null;
+          apellidos:              string | null;
           role:                   UserRole;
           status:                 UserStatus;
           phone:                  string | null;
@@ -39,6 +42,8 @@ export interface Database {
         Insert: {
           id:                      string;
           full_name?:              string | null;
+          nombres?:                string | null;
+          apellidos?:              string | null;
           role?:                   UserRole;
           status?:                 UserStatus;
           phone?:                  string | null;
@@ -49,6 +54,8 @@ export interface Database {
         };
         Update: {
           full_name?:              string | null;
+          nombres?:                string | null;
+          apellidos?:              string | null;
           role?:                   UserRole;
           status?:                 UserStatus;
           phone?:                  string | null;
@@ -364,6 +371,51 @@ export interface Database {
         Relationships: [];
       };
 
+      // ----------------------------------------------------------
+      // verificaciones_identidad (solo lectura desde la app; escritura por RPC)
+      // ----------------------------------------------------------
+      verificaciones_identidad: {
+        Row: {
+          user_id:          string;
+          tipo_documento:   'CC';
+          ultimos_digitos:  string;
+          modelo_documento: 'amarilla' | 'digital' | 'desconocido';
+          metodo_lectura:   'pdf417' | 'mrz' | 'manual';
+          coincide_numero:  boolean;
+          coincide_nombre:  boolean;
+          frente_path:      string;
+          reverso_path:     string;
+          estado:           EstadoIdentidad;
+          motivo_rechazo:   string | null;
+          revisado_por:     string | null;
+          revisado_at:      string | null;
+          intentos:         number;
+          created_at:       string;
+          updated_at:       string;
+        };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+
+      // ----------------------------------------------------------
+      // ubicaciones_usuario (última ubicación para alertas cercanas)
+      // ----------------------------------------------------------
+      ubicaciones_usuario: {
+        Row: {
+          user_id:            string;
+          lat:                number | null;
+          lng:                number | null;
+          precision_m:        number | null;
+          actualizado_at:     string | null;
+          notificar_cercanas: boolean;
+          radio_m:            number;
+        };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+
     };
 
     // ----------------------------------------------------------------
@@ -390,6 +442,51 @@ export interface Database {
         Args: { p_alert_id: string };
         Returns: Database['public']['Tables']['alerts']['Row'];
       };
+      registrar_identidad: {
+        Args: {
+          p_numero: string; p_modelo: string; p_metodo: string;
+          p_coincide_numero: boolean; p_coincide_nombre: boolean;
+          p_datos: Record<string, unknown> | null; p_frente: string; p_reverso: string;
+        };
+        Returns: { estado: EstadoIdentidad; ultimos_digitos: string }[];
+      };
+      mi_identidad: {
+        Args: Record<string, never>;
+        Returns: { estado: EstadoIdentidad; ultimos_digitos: string; motivo_rechazo: string | null; intentos: number; actualizado_at: string }[];
+      };
+      puede_reportar: { Args: Record<string, never>; Returns: boolean };
+      admin_listar_identidades: {
+        Args: { p_estado?: EstadoIdentidad | null };
+        Returns: {
+          user_id: string; nombres: string | null; apellidos: string | null; email: string | null;
+          estado: EstadoIdentidad; ultimos_digitos: string; modelo_documento: string; metodo_lectura: string;
+          coincide_numero: boolean; coincide_nombre: boolean; intentos: number; motivo_rechazo: string | null;
+          created_at: string; updated_at: string;
+        }[];
+      };
+      admin_detalle_identidad: {
+        Args: { p_user_id: string };
+        Returns: { numero: string; datos_documento: Record<string, unknown> | null; frente_path: string; reverso_path: string; estado: EstadoIdentidad }[];
+      };
+      revisar_identidad: {
+        Args: { p_user_id: string; p_estado: 'verificada' | 'rechazada'; p_motivo?: string | null };
+        Returns: undefined;
+      };
+      actualizar_mi_ubicacion: {
+        Args: { p_lat: number; p_lng: number; p_precision_m?: number | null };
+        Returns: undefined;
+      };
+      configurar_alertas_cercanas: { Args: { p_activar: boolean }; Returns: undefined };
+      detalle_alerta_publica: {
+        Args: { p_alert_id: string };
+        Returns: {
+          id: string; type_code: string; description: string | null; severity: number;
+          lat: number; lng: number; status: AlertStatus; created_at: string; updated_at: string;
+          es_propia: boolean; distancia_m: number | null;
+        }[];
+      };
+      registrar_dispositivo: { Args: { p_token: string; p_plataforma?: string }; Returns: undefined };
+      eliminar_dispositivo:  { Args: { p_token: string }; Returns: undefined };
       rol_actual:     { Args: Record<string, never>; Returns: string | null };
       es_admin:       { Args: Record<string, never>; Returns: boolean };
       es_staff:       { Args: Record<string, never>; Returns: boolean };

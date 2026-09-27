@@ -1,4 +1,5 @@
 import { createClient } from '../utils/supabase/client';
+import { toUserMessage } from './errors';
 
 /**
  * Después del registro, reenvía el código de confirmación de email de Supabase (8 dígitos)
@@ -22,7 +23,7 @@ export async function sendVerificationEmail(email: string): Promise<{
     
     if (error) {
       console.error('❌ Error al reenviar confirmación:', error.message);
-      return { success: false, error: error.message };
+      return { success: false, error: toUserMessage(error) };
     }
     
     console.log('✅ Código de confirmación de 8 dígitos reenviado exitosamente por email');
@@ -54,11 +55,11 @@ export async function sendLoginOTP(email: string): Promise<{
       if (error.message.toLowerCase().includes('rate limit')) {
         return { success: false, error: 'Se alcanzó el límite de envíos de correo. Espera unos minutos e intenta de nuevo.' };
       }
-      return { success: false, error: error.message };
+      return { success: false, error: toUserMessage(error) };
     }
     return { success: true };
   } catch (error: any) {
-    return { success: false, error: error?.message ?? 'No se pudo enviar el código de verificación' };
+    return { success: false, error: toUserMessage(error, 'No se pudo enviar el código de verificación') };
   }
 }
 

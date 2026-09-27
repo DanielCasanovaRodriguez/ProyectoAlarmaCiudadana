@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { toUserMessage } from '../../../utils/errors';
 import { AlertTriangle, Loader2, Eye, EyeOff } from 'lucide-react';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
@@ -56,7 +57,7 @@ export function AdminLoginScreen({ onLoginSuccess }: AdminLoginScreenProps) {
       onLoginSuccess(adminData.user, adminData.profile, accessToken);
     } catch (err: any) {
       console.error('Admin login error:', err);
-      setError(err.message || 'Error al iniciar sesión');
+      setError(toUserMessage(err, 'Error al iniciar sesión'));
       setLoading(false);
     }
   };

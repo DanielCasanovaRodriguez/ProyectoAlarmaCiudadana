@@ -12,12 +12,13 @@
  * Ejecutar:  npm run test:db
  */
 import { PGlite } from '@electric-sql/pglite';
+import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const db = new PGlite();
+const db = new PGlite({ extensions: { pgcrypto } });
 
 // ------------------------------------------------------------------ entorno
 const SUPABASE_STUB = `
@@ -133,6 +134,21 @@ begin
 end $$;
 create trigger trg_audit_alerts after insert or update or delete on public.alerts
   for each row execute function public.log_alert_changes();
+
+-- Otras funciones heredadas de producción (cuerpos simplificados; PostGIS no existe en PGlite)
+create function public.set_updated_at() returns trigger language plpgsql as $$ begin new.updated_at := now(); return new; end $$;
+create function public.actualizar_updated_at() returns trigger language plpgsql as $$ begin new.updated_at := now(); return new; end $$;
+create function public.set_geom_from_latlng() returns trigger language plpgsql as $$ begin return new; end $$;
+create function public.alerts_near(_lat double precision, _lng double precision, _meters integer) returns setof public.alerts
+  language sql stable as $$ select * from public.alerts $$;
+create function public.get_alert_media(alert_id uuid) returns text[] language plpgsql security definer as
+  $$ declare urls text[]; begin select media_urls into urls from alerts where id = alert_id; return coalesce(urls, '{}'); end $$;
+create function public.count_alert_media(alert_id uuid) returns integer language plpgsql security definer as
+  $$ begin return 0; end $$;
+create function public.alert_has_videos(alert_id uuid) returns boolean language plpgsql security definer as
+  $$ begin return false; end $$;
+create table public.spatial_ref_sys (srid int primary key, auth_name varchar);
+grant select on public.spatial_ref_sys to anon, authenticated;
 
 -- Políticas vigentes en producción (las relevantes, tal como están)
 alter table public.profiles             enable row level security;
@@ -253,6 +269,10 @@ await prueba('cualquiera (sin sesión) lista las evidencias', async () => {
     [`alertas/${previa}/previa.jpg`, U.ana]);
   igual((await como('anon', `select * from storage.objects`)).rows.length, 1);
 });
+await prueba('sin sesión se leen rutas de evidencias con get_alert_media()', async () => {
+  await comoSistema(`update public.alerts set media_urls = array['alertas/p/secreta.jpg'] where id = $1`, [previa]);
+  igual((await como('anon', `select public.get_alert_media($1) as m`, [previa])).rows[0].m[0], 'alertas/p/secreta.jpg');
+});
 const vulnerabilidades = ok;
 if (fallos) { console.log('\nLa réplica de producción no se comporta como se esperaba.'); process.exit(1); }
 await db.exec(`reset role; set request.jwt.claims = '';
@@ -288,6 +308,13 @@ await prueba('un admin SÍ puede cambiar el rol de otro usuario', async () => {
   igual((await comoSistema(`select role from public.profiles where id = $1`, [U.beto])).rows[0].role, 'operator');
   await como(U.admin, `update public.profiles set role = 'citizen' where id = $1`, [U.beto]);
 });
+
+// Desde el paso 5 los ciudadanos necesitan verificación de identidad enviada para reportar
+for (const f of ['f.jpg', 'r.jpg']) {
+  await como(U.ana, `insert into storage.objects (bucket_id, name) values ('documentos-identidad', $1)`, [`${U.ana}/${f}`]);
+}
+await como(U.ana, `select public.registrar_identidad($1,'amarilla','pdf417',true,true,null,$2,$3)`,
+  ['52000111', `${U.ana}/f.jpg`, `${U.ana}/r.jpg`]);
 
 console.log('\nAlertas');
 let alertaAna;
@@ -406,10 +433,207 @@ await prueba('ver evidencia: autora y operadora sí, otro ciudadano no', async (
   igual((await como(U.beto, `select * from storage.objects`)).rows.length, 0);
 });
 
+console.log('\nEndurecimiento (advisors)');
+await prueba('sin sesión ya NO se llama a get_alert_media()', async () => {
+  await debeFallar(como('anon', `select public.get_alert_media($1)`, [alertaAna]), '42501');
+});
+await prueba('las funciones de trigger no se pueden invocar como RPC', async () => {
+  await debeFallar(como(U.ana, `select public.crear_perfil_nuevo_usuario()`), undefined);
+  const r = await comoSistema(`select has_function_privilege('authenticated', 'public.log_alert_changes()', 'execute') as p`);
+  igual(r.rows[0].p, false);
+});
+await prueba('los triggers siguen funcionando tras revocar EXECUTE (alta de usuario)', async () => {
+  const id = '00000000-0000-0000-0000-0000000000f2';
+  await comoSistema(`insert into auth.users (id, raw_user_meta_data) values ($1, '{"full_name":"Nuevo","role":"admin"}')`, [id]);
+  const r = await comoSistema(`select role, full_name from public.profiles where id = $1`, [id]);
+  igual(r.rows[0].role, 'citizen'); igual(r.rows[0].full_name, 'Nuevo');
+});
+
+// Ana ya no necesita su verificación de prueba
+await comoSistema(`delete from public.verificaciones_identidad where user_id = $1`, [U.ana]);
+// ---- Paso 5: se inserta antes de "las migraciones se pueden volver a ejecutar"
+console.log('\nNombres y apellidos');
+await prueba('los perfiles existentes se dividieron en nombres y apellidos', async () => {
+  const r = await comoSistema(`select nombres, apellidos from public.profiles where id = $1`, [U.oper]);
+  igual(r.rows[0].nombres, 'Olga'); igual(r.rows[0].apellidos, 'Operadora');
+});
+await prueba('registro con nombres, apellidos y teléfono en metadatos', async () => {
+  const id = '00000000-0000-0000-0000-0000000000f3';
+  await comoSistema(`insert into auth.users (id, raw_user_meta_data) values ($1, $2)`,
+    [id, JSON.stringify({ nombres: ' María  José ', apellidos: 'Gómez Ruiz', phone: '300 123 4567', role: 'admin' })]);
+  const r = await comoSistema(`select nombres, apellidos, full_name, phone, role from public.profiles where id = $1`, [id]);
+  igual(r.rows[0].nombres, 'María José'); igual(r.rows[0].apellidos, 'Gómez Ruiz');
+  igual(r.rows[0].full_name, 'María José Gómez Ruiz'); igual(r.rows[0].phone, '3001234567'); igual(r.rows[0].role, 'citizen');
+});
+await prueba('editar nombres/apellidos actualiza full_name', async () => {
+  await como(U.ana, `update public.profiles set nombres = 'Ana Lucía', apellidos = 'Pérez' where id = $1`, [U.ana]);
+  igual((await comoSistema(`select full_name from public.profiles where id = $1`, [U.ana])).rows[0].full_name, 'Ana Lucía Pérez');
+});
+await prueba('un cliente antiguo que solo envía full_name sigue funcionando', async () => {
+  await como(U.ana, `update public.profiles set full_name = 'Ana Pérez Gómez' where id = $1`, [U.ana]);
+  const r = await comoSistema(`select nombres, apellidos, full_name from public.profiles where id = $1`, [U.ana]);
+  igual(r.rows[0].nombres, 'Ana'); igual(r.rows[0].apellidos, 'Pérez Gómez'); igual(r.rows[0].full_name, 'Ana Pérez Gómez');
+});
+
+console.log('\nVerificación de identidad (cédula)');
+const subirDoc = async (uid, nombre) => {
+  await como(uid, `insert into storage.objects (bucket_id, name) values ('documentos-identidad', $1)`, [`${uid}/${nombre}`]);
+  return `${uid}/${nombre}`;
+};
+const registrar = async (uid, numero, extra = {}) => {
+  const f = await subirDoc(uid, `frente-${Date.now()}-${Math.random()}.jpg`);
+  const r = await subirDoc(uid, `reverso-${Date.now()}-${Math.random()}.jpg`);
+  return como(uid, `select * from public.registrar_identidad($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [numero, extra.modelo ?? 'amarilla', extra.metodo ?? 'pdf417', true, true,
+     JSON.stringify({ nombres: 'X' }), extra.frente ?? f, extra.reverso ?? r]);
+};
+const CED_BETO = '1012345678';
+await prueba('un ciudadano sube fotos a su carpeta pero no a la ajena', async () => {
+  await subirDoc(U.beto, 'prueba.jpg');
+  await debeFallar(como(U.beto, `insert into storage.objects (bucket_id, name) values ('documentos-identidad', $1)`, [`${U.ana}/x.jpg`]));
+});
+await prueba('nadie (ni el dueño) puede volver a leer las fotos; solo admin', async () => {
+  igual((await como(U.beto, `select * from storage.objects where bucket_id = 'documentos-identidad'`)).rows.length, 0);
+  igual((await como(U.oper, `select * from storage.objects where bucket_id = 'documentos-identidad'`)).rows.length, 0);
+  igual((await como(U.admin, `select * from storage.objects where bucket_id = 'documentos-identidad'`)).rows.length >= 1, true);
+});
+await prueba('registrar la cédula deja estado pendiente y muestra solo los últimos 4 dígitos', async () => {
+  const r = await registrar(U.beto, '1.012.345.678');
+  igual(r.rows[0].estado, 'pendiente'); igual(r.rows[0].ultimos_digitos, '5678');
+});
+await prueba('el número NO se guarda en texto plano', async () => {
+  const r = await comoSistema(`select numero_hash, encode(numero_cifrado, 'escape') c from public.verificaciones_identidad where user_id = $1`, [U.beto]);
+  igual(r.rows[0].numero_hash.includes(CED_BETO), false); igual(r.rows[0].c.includes(CED_BETO), false);
+});
+await prueba('la misma cédula en otra cuenta es rechazada (una cédula = una cuenta)', async () => {
+  await debeFallar(registrar(U.ana, CED_BETO), '23505');
+  await debeFallar(registrar(U.ana, '001012345678'), '23505'); // ceros a la izquierda: misma cédula
+});
+await prueba('rechaza números inválidos y fotos que no existen o son ajenas', async () => {
+  await debeFallar(registrar(U.ana, '12ab'), '22023');
+  await debeFallar(registrar(U.ana, '98765432', { frente: `${U.ana}/no-existe.jpg` }), '22023');
+  await debeFallar(registrar(U.ana, '98765432', { frente: `${U.beto}/prueba.jpg` }), '22023');
+});
+await prueba('un ciudadano no puede escribir la tabla de verificaciones directamente', async () => {
+  await debeFallar(como(U.ana, `update public.verificaciones_identidad set estado = 'verificada'`));
+  await debeFallar(como(U.ana, `insert into public.verificaciones_identidad (user_id, numero_hash, numero_cifrado, ultimos_digitos, metodo_lectura, frente_path, reverso_path) values ($1,'h','\\x00','1','manual','a','b')`, [U.ana]));
+});
+await prueba('cada usuario solo ve su propia verificación', async () => {
+  igual((await como(U.ana, `select * from public.verificaciones_identidad`)).rows.length, 0);
+  igual((await como(U.beto, `select estado from public.mi_identidad()`)).rows[0].estado, 'pendiente');
+});
+await prueba('sin verificación no se puede reportar; con verificación enviada sí', async () => {
+  igual((await como(U.ana, `select public.puede_reportar() p`)).rows[0].p, false);
+  await debeFallar(nuevaAlerta(U.ana, 'fire'));
+  igual((await como(U.beto, `select public.puede_reportar() p`)).rows[0].p, true);
+  await nuevaAlerta(U.beto, 'fire');
+  igual((await como(U.oper, `select public.puede_reportar() p`)).rows[0].p, true); // personal: siempre
+});
+await prueba('solo el admin descifra el número; auditor y ciudadano no', async () => {
+  igual((await como(U.admin, `select numero from public.admin_detalle_identidad($1)`, [U.beto])).rows[0].numero, CED_BETO);
+  await debeFallar(como(U.audi, `select * from public.admin_detalle_identidad($1)`, [U.beto]), '42501');
+  await debeFallar(como(U.beto, `select * from public.admin_detalle_identidad($1)`, [U.beto]), '42501');
+});
+await prueba('admin y auditor listan verificaciones; el ciudadano no', async () => {
+  igual((await como(U.admin, `select * from public.admin_listar_identidades('pendiente')`)).rows.length >= 1, true);
+  igual((await como(U.audi, `select * from public.admin_listar_identidades()`)).rows.length >= 1, true);
+  await debeFallar(como(U.ana, `select * from public.admin_listar_identidades()`), '42501');
+});
+await prueba('revisión: el rechazo exige motivo, bloquea reportes y libera la cédula', async () => {
+  await debeFallar(como(U.admin, `select public.revisar_identidad($1, 'rechazada', '')`, [U.beto]), '22023');
+  await debeFallar(como(U.audi, `select public.revisar_identidad($1, 'verificada')`, [U.beto]), '42501');
+  await como(U.admin, `select public.revisar_identidad($1, 'rechazada', 'Foto ilegible')`, [U.beto]);
+  igual((await como(U.beto, `select public.puede_reportar() p`)).rows[0].p, false);
+  await registrar(U.ana, CED_BETO); // ya liberada
+  await comoSistema(`delete from public.verificaciones_identidad where user_id = $1`, [U.ana]);
+});
+await prueba('reenviar tras rechazo vuelve a pendiente; admin la aprueba', async () => {
+  const r = await registrar(U.beto, CED_BETO);
+  igual(r.rows[0].estado, 'pendiente');
+  await como(U.admin, `select public.revisar_identidad($1, 'verificada')`, [U.beto]);
+  igual((await como(U.beto, `select estado from public.mi_identidad()`)).rows[0].estado, 'verificada');
+  await debeFallar(registrar(U.beto, CED_BETO), '22023'); // ya verificada
+});
+await prueba('máximo 5 intentos de verificación', async () => {
+  await registrar(U.ana, '55555555');
+  for (let i = 0; i < 4; i++) await registrar(U.ana, '55555555');
+  await debeFallar(registrar(U.ana, '55555555'), '22023');
+});
+
+console.log('\nAlertas cercanas (1 km)');
+// Alerta en Kennedy; ubicaciones: oper a ~450 m, admin a ~1,6 km
+const K = { lat: 4.6280, lng: -74.1477 };
+let alertaCercana;
+await prueba('cada usuario guarda su ubicación (redondeada) y nadie más la ve', async () => {
+  await como(U.oper,  `select public.actualizar_mi_ubicacion($1, $2, 12)`, [K.lat + 0.00404, K.lng]);   // ~450 m
+  await como(U.admin, `select public.actualizar_mi_ubicacion($1, $2, 12)`, [K.lat + 0.0144, K.lng]);    // ~1,6 km
+  await como(U.audi,  `select public.actualizar_mi_ubicacion($1, $2, 12)`, [K.lat, K.lng + 0.003]);     // ~330 m
+  const r = await comoSistema(`select lat from public.ubicaciones_usuario where user_id = $1`, [U.oper]);
+  igual(Number(r.rows[0].lat), 4.632, 'redondeo a 3 decimales:');
+  igual((await como(U.oper, `select * from public.ubicaciones_usuario`)).rows.length, 1);
+  await debeFallar(como(U.oper, `update public.ubicaciones_usuario set lat = 0`));
+});
+await prueba('usuarios_cercanos: incluye a quien está a <1 km, excluye a quien está lejos y al autor', async () => {
+  await como(U.beto, `select public.actualizar_mi_ubicacion($1, $2)`, [K.lat, K.lng]);
+  alertaCercana = (await como(U.beto, `insert into public.alerts (user_id, type_code, lat, lng) values ($1,'robbery',$2,$3) returning id`, [U.beto, K.lat, K.lng])).rows[0].id;
+  const r = await comoSistema(`select user_id, distancia_m from public.usuarios_cercanos($1)`, [alertaCercana]);
+  const ids = r.rows.map(x => x.user_id);
+  igual(ids.includes(U.oper), true, 'operadora a 450 m:'); igual(ids.includes(U.audi), true, 'auditor a 330 m:');
+  igual(ids.includes(U.admin), false, 'admin a 1,6 km:'); igual(ids.includes(U.beto), false, 'autor:');
+  const d = r.rows.find(x => x.user_id === U.oper).distancia_m;
+  igual(d > 350 && d < 550, true, `distancia ${d} m:`);
+});
+await prueba('respeta la preferencia de no recibir avisos y las ubicaciones antiguas', async () => {
+  await como(U.audi, `select public.configurar_alertas_cercanas(false)`);
+  await comoSistema(`update public.ubicaciones_usuario set actualizado_at = now() - interval '3 days' where user_id = $1`, [U.oper]);
+  const ids = (await comoSistema(`select user_id from public.usuarios_cercanos($1)`, [alertaCercana])).rows.map(x => x.user_id);
+  igual(ids.includes(U.audi), false, 'desactivado:'); igual(ids.includes(U.oper), false, 'ubicación de hace 3 días:');
+  await como(U.audi, `select public.configurar_alertas_cercanas(true)`);
+});
+await prueba('usuarios_cercanos no se puede llamar desde la app', async () => {
+  await debeFallar(como(U.ana, `select * from public.usuarios_cercanos($1)`, [alertaCercana]), '42501');
+});
+await prueba('detalle público de la alerta: sin user_id, con distancia', async () => {
+  const r = await como(U.audi, `select * from public.detalle_alerta_publica($1)`, [alertaCercana]);
+  igual(r.rows.length, 1); igual('user_id' in r.rows[0], false); igual(r.rows[0].es_propia, false);
+  igual(r.rows[0].distancia_m > 250 && r.rows[0].distancia_m < 400, true, `distancia ${r.rows[0].distancia_m}:`);
+  await debeFallar(como('anon', `select * from public.detalle_alerta_publica($1)`, [alertaCercana]), '42501');
+});
+await prueba('alertas resueltas de hace más de 48 h ya no se muestran', async () => {
+  await comoSistema(`update public.alerts set status = 'resolved', created_at = now() - interval '3 days' where id = $1`, [alertaCercana]);
+  igual((await como(U.audi, `select * from public.detalle_alerta_publica($1)`, [alertaCercana])).rows.length, 0);
+});
+
+console.log('\nDispositivos y disparo de notificaciones');
+const TOKEN = 'fcm-token-de-prueba-0123456789abcdef';
+await prueba('un dispositivo queda asociado a una sola cuenta (celular compartido)', async () => {
+  await como(U.ana, `select public.registrar_dispositivo($1, 'android')`, [TOKEN]);
+  await como(U.beto, `select public.registrar_dispositivo($1, 'android')`, [TOKEN]);
+  const r = await comoSistema(`select user_id from public.device_tokens where token = $1`, [TOKEN]);
+  igual(r.rows.length, 1); igual(r.rows[0].user_id, U.beto);
+});
+await prueba('cerrar sesión borra solo el dispositivo actual', async () => {
+  await como(U.beto, `select public.registrar_dispositivo($1, 'android')`, ['otro-dispositivo-0123456789abcdef']);
+  await como(U.beto, `select public.eliminar_dispositivo($1)`, [TOKEN]);
+  const r = await comoSistema(`select token from public.device_tokens where user_id = $1`, [U.beto]);
+  igual(r.rows.length, 1); igual(r.rows[0].token, 'otro-dispositivo-0123456789abcdef');
+});
+await prueba('token inválido rechazado; sin sesión no se registra', async () => {
+  await debeFallar(como(U.ana, `select public.registrar_dispositivo('x')`), '22023');
+  await debeFallar(como('anon', `select public.registrar_dispositivo($1)`, [TOKEN]), '42501');
+});
+await prueba('si el aviso no puede enviarse (URL configurada sin pg_net), la alerta se guarda igual', async () => {
+  await comoSistema(`insert into private.config values ('webhook_url', 'https://ejemplo.invalid/fn') on conflict (clave) do update set valor = excluded.valor`);
+  const id = await nuevaAlerta(U.oper, 'fire');
+  igual((await comoSistema(`select count(*)::int n from public.alerts where id = $1`, [id])).rows[0].n, 1);
+  await como(U.oper, `select public.cambiar_estado_alerta($1, 'ack')`, [id]);
+  await comoSistema(`delete from private.config where clave = 'webhook_url'`);
+});
+
 await prueba('las migraciones se pueden volver a ejecutar (idempotentes)', async () => {
   for (const f of migraciones) { await comoSistema('select 1'); await db.exec(readFileSync(join(dir, f), 'utf8')); }
 });
 
-console.log(`\nVulnerabilidades de producción reproducidas antes de migrar: ${vulnerabilidades}/6`);
+console.log(`\nVulnerabilidades de producción reproducidas antes de migrar: ${vulnerabilidades}/7`);
 console.log(`Resultado: ${ok} correctas, ${fallos} fallidas`);
 process.exit(fallos ? 1 : 0);

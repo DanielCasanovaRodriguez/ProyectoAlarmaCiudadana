@@ -1,5 +1,5 @@
 /** Datos públicos de la aplicación (sin secretos). */
-export const APP_VERSION = '1.1.1';
+export const APP_VERSION = '1.2.0';
 
 /**
  * Descarga del APK de Android: siempre la última versión publicada en

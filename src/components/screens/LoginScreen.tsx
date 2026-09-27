@@ -82,7 +82,8 @@ export function LoginScreen({
       if (data) {
         const accessToken = data.session?.access_token;
         const user = data.user;
-        const userName = user?.user_metadata?.name || '';
+        const meta = user?.user_metadata ?? {};
+        const userName = [meta.nombres, meta.apellidos].filter(Boolean).join(' ') || meta.full_name || meta.name || '';
         
         // Check if user has a collaborator role (admin, operator, auditor)
         if (accessToken && onNavigateToCollaboratorPanel) {

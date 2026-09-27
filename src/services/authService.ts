@@ -1,4 +1,5 @@
 import { supabase } from '../utils/supabase/client';
+import { toUserMessage } from '../utils/errors';
 import type { Database } from '../types/database.types';
 
 // ================================================================
@@ -14,17 +15,28 @@ export type UserProfile = Database['public']['Tables']['profiles']['Row'];
 export async function registrarUsuario(
   email: string,
   password: string,
-  nombreCompleto: string
+  datos: { nombres: string; apellidos: string; phone?: string },
 ) {
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
-      data: { full_name: nombreCompleto, role: 'citizen' },
+      // El perfil lo crea el trigger de la BD con estos datos (rol siempre 'citizen')
+      data: {
+        nombres:   datos.nombres,
+        apellidos: datos.apellidos,
+        full_name: `${datos.nombres} ${datos.apellidos}`.trim(),
+        phone:     datos.phone ?? null,
+      },
     },
   });
 
   if (error) throw error;
+  // Con confirmación de correo activa, Supabase NO devuelve error si el correo
+  // ya existe (para no revelar cuentas): lo indica con identities vacío.
+  if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+    throw new Error('Ya existe una cuenta con este correo. Inicia sesión o recupera tu contraseña.');
+  }
   return data;
 }
 
@@ -192,7 +204,7 @@ export async function completeRegistration(_email: string) {
   try {
     return { success: true };
   } catch (error: any) {
-    return { success: false, error: error.message };
+    return { success: false, error: toUserMessage(error) };
   }
 }
 
@@ -211,7 +223,7 @@ export async function sendPasswordResetOTP(email: string) {
 
     return { success: true };
   } catch (error: any) {
-    return { success: false, error: error.message };
+    return { success: false, error: toUserMessage(error) };
   }
 }
 
@@ -224,21 +236,24 @@ export async function signIn(data: { email: string; password: string }) {
     const result = await iniciarSesion(data.email, data.password);
     return { data: result, error: null };
   } catch (error: any) {
-    return { data: null, error: error.message as string };
+    return { data: null, error: toUserMessage(error) };
   }
 }
 
 export async function signUp(data: {
-  email:    string;
-  password: string;
-  name:     string;
-  phone?:   string;
+  email:     string;
+  password:  string;
+  nombres:   string;
+  apellidos: string;
+  phone?:    string;
 }) {
   try {
-    const result = await registrarUsuario(data.email, data.password, data.name);
+    const result = await registrarUsuario(data.email, data.password, {
+      nombres: data.nombres, apellidos: data.apellidos, phone: data.phone,
+    });
     return { data: result, error: null };
   } catch (error: any) {
-    return { data: null, error: error.message as string };
+    return { data: null, error: toUserMessage(error, 'No se pudo crear la cuenta. Intenta de nuevo.') };
   }
 }
 
@@ -251,7 +266,7 @@ export async function updatePassword(password: string) {
     await actualizarPassword(password);
     return { success: true, error: null };
   } catch (error: any) {
-    return { success: false, error: error.message as string };
+    return { success: false, error: toUserMessage(error) };
   }
 }
 
@@ -263,9 +278,9 @@ export async function verifyPasswordResetOTP(email: string, code: string) {
       type:  'recovery',
     });
 
-    if (error) return { success: false, error: error.message };
+    if (error) return { success: false, error: toUserMessage(error) };
     return { success: true, error: null };
   } catch (error: any) {
-    return { success: false, error: error.message as string };
+    return { success: false, error: toUserMessage(error) };
   }
 }

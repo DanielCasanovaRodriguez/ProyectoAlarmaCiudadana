@@ -11,6 +11,10 @@ interface AuthInputProps {
   error?:       string;
   required?:    boolean;
   disabled?:    boolean;
+  inputMode?:   React.HTMLAttributes<HTMLInputElement>['inputMode'];
+  autoComplete?: string;
+  maxLength?:   number;
+  hint?:        string;
 }
 
 export function AuthInput({
@@ -23,6 +27,10 @@ export function AuthInput({
   error,
   required = false,
   disabled = false,
+  inputMode,
+  autoComplete,
+  maxLength,
+  hint,
 }: AuthInputProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [isFocused,    setIsFocused]    = useState(false);
@@ -51,6 +59,10 @@ export function AuthInput({
         <input
           disabled={disabled}
           type={inputType}
+          inputMode={inputMode}
+          autoComplete={autoComplete}
+          maxLength={maxLength}
+          aria-invalid={!!error}
           value={value}
           onChange={e => onChange(e.target.value)}
           onFocus={() => setIsFocused(true)}
@@ -81,9 +93,11 @@ export function AuthInput({
         )}
       </div>
 
-      {error && (
+      {error ? (
         <p className="mt-1.5 text-sm text-red-600">{error}</p>
-      )}
+      ) : hint ? (
+        <p className="mt-1.5 text-xs text-gray-500">{hint}</p>
+      ) : null}
     </div>
   );
 }

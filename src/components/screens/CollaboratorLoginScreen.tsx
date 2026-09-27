@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { toUserMessage } from '../../utils/errors';
 import { Shield, Mail, Lock, Eye, EyeOff, Loader2, ArrowLeft } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -118,11 +119,11 @@ export function CollaboratorLoginScreen({ onBack, onLoginSuccess }: Collaborator
         });
       } else if (error.message?.includes('permisos')) {
         toast.error('Sin permisos de colaborador', {
-          description: error.message,
+          description: toUserMessage(error),
         });
       } else if (error.message?.includes('activa') || error.message?.includes('activo')) {
         toast.error('Cuenta inactiva', {
-          description: error.message,
+          description: toUserMessage(error),
         });
       } else if (
         error.message?.includes('Invalid login credentials') ||
@@ -133,7 +134,7 @@ export function CollaboratorLoginScreen({ onBack, onLoginSuccess }: Collaborator
         });
       } else {
         toast.error('Error al iniciar sesión', {
-          description: error.message || 'Por favor intenta de nuevo.',
+          description: toUserMessage(error, 'Por favor intenta de nuevo.'),
         });
       }
 

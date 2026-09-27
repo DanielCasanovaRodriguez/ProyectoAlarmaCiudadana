@@ -235,7 +235,7 @@ export function MediaUpload({
         errorMessage = 'Tu navegador no soporta grabación de audio.\n\n' +
           'Por favor usa un navegador moderno como Chrome, Firefox, Edge o Safari.';
       } else {
-        errorMessage = `Error al acceder al micrófono: ${error.message}\n\n` +
+        errorMessage = 'No se pudo acceder al micrófono.\n\n' +
           'Verifica los permisos del navegador y que estés usando HTTPS.';
       }
 

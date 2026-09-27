@@ -1,4 +1,5 @@
 import { supabase } from '../utils/supabase/client';
+import { toUserMessage } from '../utils/errors';
 import type { AlertStatus } from '../types/database.types';
 import { isMissingRpc } from './rpc';
 import type { Incident, TimelineEntry, Filters, Severity, IncidentType, Unit } from '../components/operator/types';
@@ -84,11 +85,11 @@ export async function getAllIncidents(): Promise<{
       .in('status', ['open', 'ack'])
       .order('created_at', { ascending: false });
 
-    if (error) return { data: null, error: error.message };
+    if (error) return { data: null, error: toUserMessage(error) };
 
     return { data: (data ?? []).map(rowToIncident), error: null };
   } catch (err: any) {
-    return { data: null, error: err.message };
+    return { data: null, error: toUserMessage(err) };
   }
 }
 
@@ -106,7 +107,7 @@ export async function updateIncidentStatus(
     const { error: rpcError } = await supabase
       .rpc('cambiar_estado_alerta', { p_alert_id: incidentId, p_nuevo: newStatus, p_nota: note?.trim() || null });
     if (!rpcError) return { error: null };
-    if (!isMissingRpc(rpcError)) return { error: rpcError.message };
+    if (!isMissingRpc(rpcError)) return { error: toUserMessage(rpcError) };
 
     // Respaldo mientras la migración no esté aplicada
     const updates: any = {
@@ -122,7 +123,7 @@ export async function updateIncidentStatus(
       .update(updates)
       .eq('id', incidentId);
 
-    if (updateError) return { error: updateError.message };
+    if (updateError) return { error: toUserMessage(updateError) };
 
     // Registrar cambio en historial
     const { data: { user } } = await supabase.auth.getUser();
@@ -137,7 +138,7 @@ export async function updateIncidentStatus(
 
     return { error: null };
   } catch (err: any) {
-    return { error: err.message };
+    return { error: toUserMessage(err) };
   }
 }
 
@@ -163,10 +164,10 @@ export async function assignUnitToIncident(
         eta_minutos:   etaMinutos ?? null,
       });
 
-    if (error) return { error: error.message };
+    if (error) return { error: toUserMessage(error) };
     return { error: null };
   } catch (err: any) {
-    return { error: err.message };
+    return { error: toUserMessage(err) };
   }
 }
 
@@ -184,7 +185,7 @@ export async function getIncidentTimeline(incidentId: string): Promise<{
       .eq('alert_id', incidentId)
       .order('changed_at', { ascending: true });
 
-    if (error) return { data: null, error: error.message };
+    if (error) return { data: null, error: toUserMessage(error) };
 
     const entries: TimelineEntry[] = (data ?? []).map(e => ({
       id:        e.id,
@@ -197,7 +198,7 @@ export async function getIncidentTimeline(incidentId: string): Promise<{
 
     return { data: entries, error: null };
   } catch (err: any) {
-    return { data: null, error: err.message };
+    return { data: null, error: toUserMessage(err) };
   }
 }
 

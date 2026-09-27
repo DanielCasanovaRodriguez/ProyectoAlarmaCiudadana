@@ -1,6 +1,7 @@
 import { createClient as createSupabaseClient, SupabaseClient } from '@supabase/supabase-js';
 import { supabaseUrl, supabaseAnonKey } from './info';
 import type { Database } from '../../types/database.types';
+import { fetchConControlDeRed } from './fetch';
 
 // ================================================================
 // TIPO del cliente con la BD tipada
@@ -20,6 +21,8 @@ export function createClient(): TypedSupabaseClient {
         persistSession:     true,
         detectSessionInUrl: false,
       },
+      // Detecta falta de conexión y solicitudes colgadas (mensajes claros, no "Failed to fetch")
+      global: { fetch: fetchConControlDeRed },
     });
 
     instance.auth.onAuthStateChange((event) => {
