@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
+import { toUserMessage } from '../utils/errors';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { Alert } from '../App';
-import { AlertTriangle, Car, Shield, Flame, Users, X } from 'lucide-react';
+import { AlertTriangle, Car, Shield, Flame, Users, X, WifiOff, Phone } from 'lucide-react';
+import { useOnlineStatus } from '../platform/network';
 import { MediaUpload } from './MediaUpload';
 import { HoldToConfirmButton } from './HoldToConfirmButton';
 import { MediaFile } from '../services/mediaService';
@@ -68,6 +70,7 @@ export function AlarmSheet({ isOpen, onClose, onCreateAlert }: AlarmSheetProps) 
   const [selectedType,  setSelectedType]  = useState<Alert['type'] | null>(null);
   const [description,   setDescription]   = useState('');
   const [isSubmitting,  setIsSubmitting]  = useState(false);
+  const online = useOnlineStatus();
   const [mediaFiles,    setMediaFiles]    = useState<MediaFile[]>([]);
 
   const resetForm = () => {
@@ -99,7 +102,7 @@ export function AlarmSheet({ isOpen, onClose, onCreateAlert }: AlarmSheetProps) 
     } catch (error: any) {
       console.error('Error al enviar alarma:', error);
       toast.error('Error al enviar la alarma', {
-        description: error.message || 'Por favor intenta de nuevo',
+        description: toUserMessage(error, 'Por favor intenta de nuevo'),
       });
       setIsSubmitting(false);
     }
@@ -233,6 +236,25 @@ export function AlarmSheet({ isOpen, onClose, onCreateAlert }: AlarmSheetProps) 
             </div>
           </div>
 
+          {/* Sin conexión: la alerta no puede llegar al servidor */}
+          {!online && (
+            <div className="mx-6 mb-3 rounded-xl border border-red-200 bg-red-50 p-3 flex flex-col gap-2" role="alert">
+              <div className="flex items-start gap-2 text-sm text-red-800">
+                <WifiOff className="w-4 h-4 mt-0.5 flex-shrink-0" aria-hidden />
+                <span>
+                  <strong>Sin conexión a internet.</strong> Tu alerta no puede enviarse ahora.
+                  Si es una emergencia, llama a la Línea 123.
+                </span>
+              </div>
+              <a
+                href="tel:123"
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 text-white text-sm font-semibold py-2"
+              >
+                <Phone className="w-4 h-4" aria-hidden /> Llamar al 123
+              </a>
+            </div>
+          )}
+
           {/* Footer */}
           <div className="px-6 py-4 border-t border-gray-100 flex gap-3 flex-shrink-0">
             <Button
@@ -245,7 +267,7 @@ export function AlarmSheet({ isOpen, onClose, onCreateAlert }: AlarmSheetProps) 
             </Button>
             <HoldToConfirmButton
               onConfirm={handleSubmit}
-              disabled={!selectedType || isSubmitting}
+              disabled={!selectedType || isSubmitting || !online}
               className="flex-1 bg-red-500 hover:bg-red-600 text-white"
             >
               {isSubmitting ? (

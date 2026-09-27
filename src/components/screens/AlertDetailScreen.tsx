@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { toUserMessage } from '../../utils/errors';
 import {
   ArrowLeft, AlertTriangle, Car, Shield, Flame, Users,
   Clock, MapPin, Image as ImageIcon, Video, Mic,
@@ -159,7 +160,7 @@ export function AlertDetailScreen({
       setHistory(historyData);
       setUnit(unitData);
     } catch (err: any) {
-      setError(err.message ?? 'Error al cargar los datos.');
+      setError(toUserMessage(err, 'Error al cargar los datos.'));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -185,7 +186,7 @@ export function AlertDetailScreen({
       setShowConfirm(false);
       // La pantalla se cierra desde App.tsx después de cancelar
     } catch (err: any) {
-      toast.error('No se pudo cancelar', { description: err.message });
+      toast.error('No se pudo cancelar', { description: toUserMessage(err) });
       setCancelling(false);
       setShowConfirm(false);
     }

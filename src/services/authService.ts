@@ -1,4 +1,5 @@
 import { supabase } from '../utils/supabase/client';
+import { toUserMessage } from '../utils/errors';
 import type { Database } from '../types/database.types';
 
 // ================================================================
@@ -192,7 +193,7 @@ export async function completeRegistration(_email: string) {
   try {
     return { success: true };
   } catch (error: any) {
-    return { success: false, error: error.message };
+    return { success: false, error: toUserMessage(error) };
   }
 }
 
@@ -211,7 +212,7 @@ export async function sendPasswordResetOTP(email: string) {
 
     return { success: true };
   } catch (error: any) {
-    return { success: false, error: error.message };
+    return { success: false, error: toUserMessage(error) };
   }
 }
 
@@ -224,7 +225,7 @@ export async function signIn(data: { email: string; password: string }) {
     const result = await iniciarSesion(data.email, data.password);
     return { data: result, error: null };
   } catch (error: any) {
-    return { data: null, error: error.message as string };
+    return { data: null, error: toUserMessage(error) };
   }
 }
 
@@ -238,7 +239,7 @@ export async function signUp(data: {
     const result = await registrarUsuario(data.email, data.password, data.name);
     return { data: result, error: null };
   } catch (error: any) {
-    return { data: null, error: error.message as string };
+    return { data: null, error: toUserMessage(error) };
   }
 }
 
@@ -251,7 +252,7 @@ export async function updatePassword(password: string) {
     await actualizarPassword(password);
     return { success: true, error: null };
   } catch (error: any) {
-    return { success: false, error: error.message as string };
+    return { success: false, error: toUserMessage(error) };
   }
 }
 
@@ -263,9 +264,9 @@ export async function verifyPasswordResetOTP(email: string, code: string) {
       type:  'recovery',
     });
 
-    if (error) return { success: false, error: error.message };
+    if (error) return { success: false, error: toUserMessage(error) };
     return { success: true, error: null };
   } catch (error: any) {
-    return { success: false, error: error.message as string };
+    return { success: false, error: toUserMessage(error) };
   }
 }

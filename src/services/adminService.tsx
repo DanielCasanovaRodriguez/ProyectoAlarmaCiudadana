@@ -1,4 +1,5 @@
 import { supabase } from '../utils/supabase/client';
+import { toUserMessage } from '../utils/errors';
 import type { Database } from '../types/database.types';
 import type { UserRole, UserStatus, AlertStatus } from '../types/database.types';
 
@@ -131,7 +132,7 @@ export async function verifyAdminAccess(_accessToken?: string) {
       error: null,
     };
   } catch (error: any) {
-    return { data: null, error: error.message };
+    return { data: null, error: toUserMessage(error) };
   }
 }
 
@@ -150,14 +151,14 @@ export async function getCurrentUserProfile(_accessToken?: string) {
       .eq('id', user.id)
       .single();
 
-    if (error) return { data: null, error: error.message };
+    if (error) return { data: null, error: toUserMessage(error) };
 
     return {
       data: { ...data, name: (data as any).full_name, email: user.email },
       error: null,
     };
   } catch (error: any) {
-    return { data: null, error: error.message };
+    return { data: null, error: toUserMessage(error) };
   }
 }
 
@@ -181,7 +182,7 @@ export async function getDashboardKPIs(_accessToken?: string): Promise<{
       .from('alerts')
       .select('id, status, type_code, created_at, resolved_at');
 
-    if (alertError) return { data: null, error: alertError.message };
+    if (alertError) return { data: null, error: toUserMessage(alertError) };
     const todas = todasRaw ?? [];
 
     // ── Operadores activos ───────────────────────────────────────
@@ -248,7 +249,7 @@ export async function getDashboardKPIs(_accessToken?: string): Promise<{
 
     return { data: { kpis, timeSeries, recentAlerts }, error: null };
   } catch (error: any) {
-    return { data: null, error: error.message };
+    return { data: null, error: toUserMessage(error) };
   }
 }
 
@@ -271,11 +272,11 @@ export async function getAdminAlerts(_accessToken?: string, filters?: {
     if (filters?.to)     query = query.lte('created_at', `${filters.to}T23:59:59`);
 
     const { data, error } = await query.order('created_at', { ascending: false });
-    if (error) return { data: null, error: error.message };
+    if (error) return { data: null, error: toUserMessage(error) };
 
     return { data: (data ?? []).map(mapAlert), error: null };
   } catch (error: any) {
-    return { data: null, error: error.message };
+    return { data: null, error: toUserMessage(error) };
   }
 }
 
@@ -296,10 +297,10 @@ export async function createAdminAlert(payload: {
       })
       .select().single();
 
-    if (error) return { data: null, error: error.message };
+    if (error) return { data: null, error: toUserMessage(error) };
     return { data: mapAlert(data), error: null };
   } catch (error: any) {
-    return { data: null, error: error.message };
+    return { data: null, error: toUserMessage(error) };
   }
 }
 
@@ -314,20 +315,20 @@ export async function updateAdminAlert(
     const { data, error } = await supabase
       .from('alerts').update(updates).eq('id', alertId).select().single();
 
-    if (error) return { data: null, error: error.message };
+    if (error) return { data: null, error: toUserMessage(error) };
     return { data: mapAlert(data), error: null };
   } catch (error: any) {
-    return { data: null, error: error.message };
+    return { data: null, error: toUserMessage(error) };
   }
 }
 
 export async function deleteAdminAlert(alertId: string): Promise<{ error: string | null }> {
   try {
     const { error } = await supabase.from('alerts').delete().eq('id', alertId);
-    if (error) return { error: error.message };
+    if (error) return { error: toUserMessage(error) };
     return { error: null };
   } catch (error: any) {
-    return { error: error.message };
+    return { error: toUserMessage(error) };
   }
 }
 
@@ -346,7 +347,7 @@ export async function getAllUsers(_accessToken?: string, filters?: {
     if (filters?.search) query = query.ilike('full_name', `%${filters.search}%`);
 
     const { data, error } = await query.order('created_at', { ascending: false });
-    if (error) return { data: null, error: error.message };
+    if (error) return { data: null, error: toUserMessage(error) };
 
     return {
       data: (data ?? []).map(u => ({
@@ -355,7 +356,7 @@ export async function getAllUsers(_accessToken?: string, filters?: {
       error: null,
     };
   } catch (error: any) {
-    return { data: null, error: error.message };
+    return { data: null, error: toUserMessage(error) };
   }
 }
 
@@ -369,10 +370,10 @@ export async function updateUser(
       .update({ ...updates, updated_at: new Date().toISOString() })
       .eq('id', userId).select().single();
 
-    if (error) return { data: null, error: error.message };
+    if (error) return { data: null, error: toUserMessage(error) };
     return { data: { ...data, name: (data as any).full_name, createdAt: (data as any).created_at }, error: null };
   } catch (error: any) {
-    return { data: null, error: error.message };
+    return { data: null, error: toUserMessage(error) };
   }
 }
 
@@ -386,7 +387,7 @@ export async function createUser(
       options: { data: { full_name: userData.name, role: userData.role } },
     });
 
-    if (authError) return { data: null, error: authError.message };
+    if (authError) return { data: null, error: toUserMessage(authError) };
     if (!authData.user) return { data: null, error: 'No se pudo crear el usuario.' };
 
     // Actualizar perfil con rol y estado correctos (el trigger lo crea con 'citizen')
@@ -402,7 +403,7 @@ export async function createUser(
 
     return { data: { userId: authData.user.id, email: userData.email }, error: null };
   } catch (error: any) {
-    return { data: null, error: error.message };
+    return { data: null, error: toUserMessage(error) };
   }
 }
 
@@ -416,7 +417,7 @@ export async function deleteUser(
       .update({ status: 'suspended' as UserStatus, updated_at: new Date().toISOString() })
       .eq('id', userId).select().single();
 
-    if (error) return { data: null, error: error.message };
+    if (error) return { data: null, error: toUserMessage(error) };
 
     // Registrar en auditoría
     const { data: { user: admin } } = await supabase.auth.getUser();
@@ -428,7 +429,7 @@ export async function deleteUser(
 
     return { data, error: null };
   } catch (error: any) {
-    return { data: null, error: error.message };
+    return { data: null, error: toUserMessage(error) };
   }
 }
 
@@ -448,11 +449,11 @@ export async function getAuditLog(
     if (filters?.entity) query = query.eq('entidad', filters.entity);
 
     const { data, error } = await query;
-    if (error) return { data: null, error: error.message };
+    if (error) return { data: null, error: toUserMessage(error) };
 
     return { data: (data ?? []).map(mapAuditEntry), error: null };
   } catch (error: any) {
-    return { data: null, error: error.message };
+    return { data: null, error: toUserMessage(error) };
   }
 }
 
@@ -512,12 +513,12 @@ export async function getAlertById(
       .ilike('id', `${alertId}%`)
       .limit(1);
 
-    if (prefixError) return { data: null, error: prefixError.message };
+    if (prefixError) return { data: null, error: toUserMessage(prefixError) };
     if (!rows || rows.length === 0) return { data: null, error: 'No se encontró ninguna alerta con ese ID.' };
 
     return { data: mapAlert(rows[0]), error: null };
   } catch (error: any) {
-    return { data: null, error: error.message };
+    return { data: null, error: toUserMessage(error) };
   }
 }
 
@@ -681,7 +682,7 @@ export async function generateReport(
     if (filters?.endDate)   query = query.lte('created_at', `${filters.endDate}T23:59:59`);
 
     const { data: raw, error } = await query.order('created_at', { ascending: false });
-    if (error) return { data: null, error: error.message };
+    if (error) return { data: null, error: toUserMessage(error) };
 
     const alertas = raw ?? [];
 
@@ -752,7 +753,7 @@ export async function generateReport(
       error: null,
     };
   } catch (error: any) {
-    return { data: null, error: error.message };
+    return { data: null, error: toUserMessage(error) };
   }
 }
 
@@ -801,7 +802,7 @@ export async function getSystemHealth(_accessToken?: string) {
       error: null,
     };
   } catch (error: any) {
-    return { data: null, error: error.message };
+    return { data: null, error: toUserMessage(error) };
   }
 }
 
@@ -827,7 +828,7 @@ export async function getSystemConfig(_accessToken?: string) {
       error: null,
     };
   } catch (error: any) {
-    return { data: null, error: error.message };
+    return { data: null, error: toUserMessage(error) };
   }
 }
 

@@ -1,4 +1,5 @@
 import { supabase } from '../utils/supabase/client';
+import { toAppError } from '../utils/errors';
 import type { Database } from '../types/database.types';
 import { isMissingRpc } from './rpc';
 
@@ -91,7 +92,7 @@ export async function createAlert(data: CreateAlertData): Promise<Alert> {
     .select()
     .single();
 
-  if (error) throw new Error(error.message);
+  if (error) throw toAppError(error);
   return alert as Alert;
 }
 
@@ -113,7 +114,7 @@ export async function updateAlertMediaUrls(
     .update(updateData)
     .eq('id', alertId);
 
-  if (error) throw new Error(`Error actualizando media_urls: ${error.message}`);
+  if (error) throw toAppError(error, 'No se pudieron adjuntar las evidencias');
 }
 
 // ================================================================
@@ -126,7 +127,7 @@ export async function getActiveAlerts(): Promise<Alert[]> {
   if (!rpcError) {
     return (rpcData ?? []).map(r => ({ ...r, user_id: '', anonimo: true } as Alert));
   }
-  if (!isMissingRpc(rpcError)) throw new Error(rpcError.message);
+  if (!isMissingRpc(rpcError)) throw toAppError(rpcError);
 
   // Respaldo mientras la migración no esté aplicada
   const { data, error } = await supabase
@@ -135,7 +136,7 @@ export async function getActiveAlerts(): Promise<Alert[]> {
     .in('status', ['open', 'ack'])
     .order('created_at', { ascending: false });
 
-  if (error) throw new Error(error.message);
+  if (error) throw toAppError(error);
   return (data ?? []) as Alert[];
 }
 
@@ -153,7 +154,7 @@ export async function getUserAlertHistory(): Promise<Alert[]> {
     .eq('user_id', user.id)
     .order('created_at', { ascending: false });
 
-  if (error) throw new Error(error.message);
+  if (error) throw toAppError(error);
   return (data ?? []) as Alert[];
 }
 
@@ -183,7 +184,7 @@ export async function getAlertTypes(): Promise<AlertType[]> {
     .eq('activo', true)
     .order('orden', { ascending: true });
 
-  if (error) throw new Error(error.message);
+  if (error) throw toAppError(error);
   return (data ?? []) as AlertType[];
 }
 
@@ -200,7 +201,7 @@ export async function updateAlertStatus(
   const { data: rpcData, error: rpcError } = await supabase
     .rpc('cambiar_estado_alerta', { p_alert_id: alertId, p_nuevo: newStatus, p_nota: note ?? null });
   if (!rpcError) return rpcData;
-  if (!isMissingRpc(rpcError)) throw new Error(rpcError.message);
+  if (!isMissingRpc(rpcError)) throw toAppError(rpcError);
 
   // Respaldo mientras la migración no esté aplicada
   const updateData: Database['public']['Tables']['alerts']['Update'] = {
@@ -216,7 +217,7 @@ export async function updateAlertStatus(
     .select()
     .single();
 
-  if (error) throw new Error(error.message);
+  if (error) throw toAppError(error);
   return data;
 }
 
@@ -270,7 +271,7 @@ export async function cancelAlert(alertId: string): Promise<void> {
   // Función del servidor: valida titularidad y estado y registra el historial.
   const { error: rpcError } = await supabase.rpc('cancelar_alerta', { p_alert_id: alertId });
   if (!rpcError) return;
-  if (!isMissingRpc(rpcError)) throw new Error(rpcError.message);
+  if (!isMissingRpc(rpcError)) throw toAppError(rpcError);
 
   // Respaldo mientras la migración no esté aplicada
   // Verificar titularidad y estado antes de cancelar
@@ -303,7 +304,7 @@ export async function cancelAlert(alertId: string): Promise<void> {
     .eq('id', alertId)
     .eq('user_id', user.id);
 
-  if (updateError) throw new Error(updateError.message);
+  if (updateError) throw toAppError(updateError);
 
   // Registrar en historial — silencioso si el trigger de BD ya lo hace
   try {

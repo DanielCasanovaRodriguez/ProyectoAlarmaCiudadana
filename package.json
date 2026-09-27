@@ -56,7 +56,8 @@
     "typecheck": "tsc --noEmit",
     "test:db": "node supabase/tests/migraciones.test.mjs",
     "android:sync": "vite build && cap sync android",
-    "android:open": "cap open android"
+    "android:open": "cap open android",
+    "test:unit": "node --disable-warning=ExperimentalWarning tests/unit/errors.test.mts"
   },
   "description": "Alerta Ciudadana - cliente web y Android (Capacitor) sobre Supabase"
 }

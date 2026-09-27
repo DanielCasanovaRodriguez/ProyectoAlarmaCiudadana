@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { toUserMessage, isOfflineError } from './utils/errors';
 import { WelcomeScreen } from './components/screens/WelcomeScreen';
 import { OnboardingScreen } from './components/screens/OnboardingScreen';
 import { LocationPermissionScreen } from './components/screens/LocationPermissionScreen';
@@ -24,6 +25,7 @@ import { OperatorDashboard } from './components/screens/operator/OperatorDashboa
 import { OperatorSettingsScreen } from './components/screens/operator/OperatorSettingsScreen';
 import { AdminPanel } from './components/screens/admin/AdminPanel';
 import { Toaster } from './components/ui/sonner';
+import { ConnectionBanner } from './components/ConnectionBanner';
 import { toast } from 'sonner';
 import {
   getUserAlertHistory,
@@ -120,6 +122,19 @@ function convertDbAlert(dbAlert: any): Alert {
 // ================================================================
 // COMPONENTE PRINCIPAL
 // ================================================================
+
+// Último perfil conocido (solo nombre, rol y estado) para abrir la app sin conexión
+type PerfilLocal = { full_name: string | null; role: string | null; status: string };
+const PERFIL_LOCAL_KEY = 'ac_perfil_local';
+function guardarPerfilLocal(userId: string, p: PerfilLocal) {
+  try { localStorage.setItem(PERFIL_LOCAL_KEY, JSON.stringify({ userId, ...p })); } catch { /* sin almacenamiento */ }
+}
+function leerPerfilLocal(userId: string): PerfilLocal | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(PERFIL_LOCAL_KEY) ?? 'null');
+    return v && v.userId === userId ? { full_name: v.full_name, role: v.role, status: v.status } : null;
+  } catch { return null; }
+}
 
 export default function App() {
   const [appState, setAppState] = useState<AppState>({
@@ -273,14 +288,24 @@ export default function App() {
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) return;
 
-        const { data: perfil } = await supabase
+        const { data: perfilBD, error: perfilError } = await supabase
           .from('profiles')
           .select('full_name, role, status')
           .eq('id', session.user.id)
           .single();
 
+        // Sin conexión: se usa el último perfil conocido en este dispositivo
+        // para no sacar al usuario de su sesión (la BD lo revalida al volver la red).
+        let perfil: PerfilLocal | null = perfilBD;
+        if (perfilError && isOfflineError(perfilError)) {
+          perfil = leerPerfilLocal(session.user.id);
+        } else if (perfilBD) {
+          guardarPerfilLocal(session.user.id, perfilBD);
+        }
+
         if (cancelled) return;
-        if (!perfil || perfil.status !== 'active') {
+        if (!perfil) return; // sin datos para decidir: pantalla de inicio, sesión intacta
+        if (perfil.status !== 'active') {
           await supabase.auth.signOut();
           return;
         }
@@ -465,7 +490,7 @@ export default function App() {
     } catch (error: any) {
       console.error('Error subiendo evidencias:', error);
       toast.warning('La alerta se envió, pero la evidencia no se pudo adjuntar', {
-        description: error.message,
+        description: toUserMessage(error),
       });
     }
   };
@@ -530,7 +555,7 @@ export default function App() {
   const handleLogout = async () => {
     try { await unregisterPush(); } catch { /* sin push */ }
     try { await cerrarSesion(); } catch (err) { console.warn('Error al cerrar sesión:', err); }
-    ['admin_user', 'admin_profile', 'admin_token', 'admin_access_token'].forEach(k => localStorage.removeItem(k));
+    ['admin_user', 'admin_profile', 'admin_token', 'admin_access_token', PERFIL_LOCAL_KEY].forEach(k => localStorage.removeItem(k));
     pushRegistered.current = false;
     updateAppState({
       auth:            { isLoggedIn: false, email: '', password: '', resetEmail: '' },
@@ -864,6 +889,7 @@ export default function App() {
 
   return (
     <div className="h-screen w-full bg-gray-100">
+      <ConnectionBanner />
       {renderCurrentScreen()}
       <Toaster />
     </div>

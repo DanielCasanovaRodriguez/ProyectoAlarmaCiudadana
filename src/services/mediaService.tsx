@@ -5,6 +5,7 @@
  */
 
 import { createClient } from '../utils/supabase/client';
+import { toUserMessage } from '../utils/errors';
 
 // ==========================================
 // TIPOS Y CONSTANTES
@@ -232,7 +233,7 @@ export async function uploadFile(
       console.error('❌ Error al subir archivo:', error);
       return {
         success: false,
-        error: error.message || 'Error al subir archivo'
+        error: toUserMessage(error, 'Error al subir archivo')
       };
     }
 
@@ -252,7 +253,7 @@ export async function uploadFile(
     console.error('❌ Error inesperado al subir archivo:', error);
     return {
       success: false,
-      error: error.message || 'Error al subir archivo'
+      error: toUserMessage(error, 'Error al subir archivo')
     };
   }
 }
@@ -320,7 +321,7 @@ export async function deleteFile(fileUrl: string): Promise<{ success: boolean; e
       console.error('❌ Error al eliminar archivo:', error);
       return {
         success: false,
-        error: error.message
+        error: toUserMessage(error)
       };
     }
 
@@ -331,7 +332,7 @@ export async function deleteFile(fileUrl: string): Promise<{ success: boolean; e
     console.error('❌ Error inesperado al eliminar archivo:', error);
     return {
       success: false,
-      error: error.message
+      error: toUserMessage(error)
     };
   }
 }
