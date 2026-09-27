@@ -137,7 +137,8 @@ revoke all on function private.secreto(text) from public, anon, authenticated;
 do $$
 declare
   s text;
-  v_hay_vault boolean := to_regprocedure('vault.create_secret(text,text,text)') is not null;
+  v_hay_vault boolean := exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                                 where n.nspname = 'vault' and p.proname = 'create_secret');
 begin
   foreach s in array array['identidad_pepper', 'identidad_llave', 'webhook_secret'] loop
     if v_hay_vault then
