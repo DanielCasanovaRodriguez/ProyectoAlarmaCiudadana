@@ -52,3 +52,25 @@ Las pruebas con inicio de sesión en el Supabase real necesitan credenciales, qu
 2. Verifica la fila en `alerts`.
 3. Android: en el mapa aparece el nuevo marcador (Realtime, o como máximo 15 s por el sondeo de respaldo).
 4. Verifica que el ciudadano de Android **no** puede ver quién la creó (tras aplicar la migración 1).
+
+## Versión 1.2.0 (2026-09-26): cédula, alertas cercanas y errores
+
+| Prueba | Resultado |
+|---|---|
+| `npm run test:db` (réplica de producción, incluye migraciones 5–7) | ✅ 61/61 |
+| `npm run test:unit` — traducción de errores (20 casos reales) | ✅ 20/20 |
+| `npm run test:unit` — cédula: PDF417 por posiciones, imagen real leída con zxing-wasm, MRZ con dígitos de control, texto real del OCR, comparación de nombres, validaciones | ✅ 31/31 |
+| Navegador: lectura PDF417 sintética (0,7 s) y MRZ por OCR (1,7 s), WebAssembly empaquetado | ✅ |
+| Navegador: registro → validaciones, autorización Ley 1581, datos conservados al volver, pantalla de escaneo | ✅ |
+| Android (emulador): cámara nativa frente/reverso, validación de resolución, lectura sin cédula real → revisión manual | ✅ |
+| Producción: migraciones aplicadas; secretos en Vault; BD → pg_net → Edge Function (HTTP 200) | ✅ |
+| Cédula real (amarilla y digital) fotografiada con un celular | ⏳ Responsable |
+| Push con la app cerrada | ⏳ Requiere Firebase (03-NOTIFICACIONES.md) |
+
+### Checklist manual con cuentas reales
+- [ ] Registro nuevo: datos → cédula (ambos lados) → código del correo → “¡Cédula recibida!” → consentimiento → ubicación → mapa.
+- [ ] Registrar otra cuenta con la **misma cédula** → “Esta cédula ya está registrada en otra cuenta”.
+- [ ] Cuenta antigua sin cédula: al entrar se ofrece verificar; con “Ahora no” el botón de alerta muestra “Verificar ahora / Llamar al 123”.
+- [ ] Admin → *Verificación de identidad*: ver fotos y número, aprobar/rechazar (el rechazo exige motivo).
+- [ ] Modo avión: aviso “Sin conexión”, SOS deshabilitado con botón “Llamar al 123”; al volver la red, “Conexión restablecida”.
+- [ ] Dos celulares a < 1 km: reportar en uno → aviso en el otro (con la app abierta; con Firebase, también cerrada).
