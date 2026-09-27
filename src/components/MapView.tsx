@@ -10,6 +10,8 @@ interface MapViewProps {
   alerts:            Alert[];          // todas las alertas activas del área
   ownActiveAlertIds: string[];         // IDs de las alertas propias del usuario
   userLocation:      { lat: number; lng: number } | null;
+  /** Centra el mapa en este punto (p. ej. una alerta) en lugar de en el usuario. */
+  center?:           { lat: number; lng: number } | null;
 }
 
 
@@ -133,7 +135,8 @@ function formatTimeAgo(timestamp: Date): string {
 // COMPONENTE
 // ================================================================
 
-export function MapView({ alerts, ownActiveAlertIds, userLocation }: MapViewProps) {
+export function MapView({ alerts, ownActiveAlertIds, userLocation, center: centroFijo }: MapViewProps) {
+  const centradoEnUsuarioRef = useRef(false);
   const mapRef         = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
   const markersRef     = useRef<any[]>([]);
@@ -161,7 +164,9 @@ export function MapView({ alerts, ownActiveAlertIds, userLocation }: MapViewProp
     function initMap() {
       if (!mapRef.current || mapInstanceRef.current) return;
 
-      const center = userLocation
+      const center = centroFijo
+        ? [centroFijo.lat, centroFijo.lng] as [number, number]
+        : userLocation
         ? [userLocation.lat, userLocation.lng] as [number, number]
         : BOGOTA_CENTER;
 
@@ -232,7 +237,12 @@ export function MapView({ alerts, ownActiveAlertIds, userLocation }: MapViewProp
       .addTo(map)
       .bindPopup('<strong>Tu ubicación</strong>');
 
-    map.setView([userLocation.lat, userLocation.lng], 15);
+    // Centrar en el usuario solo la primera vez: con la ubicación en vivo no se
+    // debe mover el mapa mientras la persona lo recorre.
+    if (!centroFijo && !centradoEnUsuarioRef.current) {
+      map.setView([userLocation.lat, userLocation.lng], 15);
+    }
+    centradoEnUsuarioRef.current = true;
   }, [userLocation]);
 
   // ── Actualizar marcadores de alertas del área ────────────────────

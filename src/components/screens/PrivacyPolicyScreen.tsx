@@ -82,8 +82,17 @@ export function PrivacyPolicyScreen({ onBack }: PrivacyPolicyScreenProps) {
                 <div>
                   <h4 className="font-medium text-gray-900 mb-1">Datos que recolectamos:</h4>
                   <ul className="list-disc list-inside space-y-1 text-xs">
-                    <li>Información personal: nombre, teléfono, email</li>
-                    <li>Ubicación geográfica (solo durante emergencias)</li>
+                    <li>Información personal: nombres, apellidos, celular y correo</li>
+                    <li>
+                      Documento de identidad: fotos de ambos lados de la cédula y su número, para
+                      garantizar una cuenta por persona y prevenir alertas falsas. El número se guarda
+                      cifrado y las fotos solo las puede ver el equipo de verificación.
+                    </li>
+                    <li>Ubicación geográfica al reportar una alerta y mientras usas el mapa</li>
+                    <li>
+                      Tu última ubicación aproximada (redondeada a unos 100 m), solo para avisarte de
+                      alertas a 1 km de ti. Puedes desactivarlo en tu perfil. Nadie más puede verla.
+                    </li>
                     <li>Contactos de emergencia autorizados</li>
                     <li>Historial de alertas reportadas</li>
                     <li>Datos técnicos del dispositivo (modelo, versión OS)</li>

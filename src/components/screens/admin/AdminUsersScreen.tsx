@@ -80,7 +80,8 @@ export function AdminUsersScreen({ accessToken }: AdminUsersScreenProps) {
 
   // Create
   const [createOpen,      setCreateOpen]      = useState(false);
-  const [newName,         setNewName]         = useState('');
+  const [newNombres,      setNewNombres]      = useState('');
+  const [newApellidos,    setNewApellidos]    = useState('');
   const [newEmail,        setNewEmail]        = useState('');
   const [newPassword,     setNewPassword]     = useState('');
   const [newRole,         setNewRole]         = useState('citizen');
@@ -165,13 +166,13 @@ export function AdminUsersScreen({ accessToken }: AdminUsersScreenProps) {
   };
 
   const handleCreateUser = async () => {
-    if (!newName.trim() || !newEmail.trim() || !newPassword.trim()) {
+    if (!newNombres.trim() || !newApellidos.trim() || !newEmail.trim() || !newPassword.trim()) {
       toast.error('Completa todos los campos requeridos');
       return;
     }
     setCreating(true);
     const { data, error } = await createUser(accessToken, {
-      name: newName.trim(), email: newEmail.trim(),
+      nombres: newNombres.trim(), apellidos: newApellidos.trim(), email: newEmail.trim(),
       password: newPassword, role: newRole, status: newStatus,
     });
     if (data) {
@@ -179,7 +180,7 @@ export function AdminUsersScreen({ accessToken }: AdminUsersScreenProps) {
         description: 'Puede que necesite confirmar su email según la configuración de Supabase.',
       });
       setCreateOpen(false);
-      setNewName(''); setNewEmail(''); setNewPassword('');
+      setNewNombres(''); setNewApellidos(''); setNewEmail(''); setNewPassword('');
       setNewRole('citizen'); setNewStatus('active');
       loadUsers();
     } else {
@@ -399,9 +400,15 @@ export function AdminUsersScreen({ accessToken }: AdminUsersScreenProps) {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <div>
-              <Label htmlFor="new-name">Nombre completo *</Label>
-              <Input id="new-name" placeholder="Nombre completo" value={newName} onChange={e => setNewName(e.target.value)} className="mt-1.5" />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="new-nombres">Nombres *</Label>
+                <Input id="new-nombres" placeholder="Nombres" value={newNombres} onChange={e => setNewNombres(e.target.value)} className="mt-1.5" maxLength={60} />
+              </div>
+              <div>
+                <Label htmlFor="new-apellidos">Apellidos *</Label>
+                <Input id="new-apellidos" placeholder="Apellidos" value={newApellidos} onChange={e => setNewApellidos(e.target.value)} className="mt-1.5" maxLength={60} />
+              </div>
             </div>
             <div>
               <Label htmlFor="new-email">Correo electrónico *</Label>

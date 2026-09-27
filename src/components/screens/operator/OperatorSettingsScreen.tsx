@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { validarNombrePersona } from '../../../utils/cedula';
 import { ArrowLeft, User, Bell, Shield, Save, Loader2, CheckCircle } from 'lucide-react';
 import { Button }    from '../../ui/button';
 import { Input }     from '../../ui/input';
@@ -16,7 +17,8 @@ interface OperatorSettingsScreenProps {
 
 export function OperatorSettingsScreen({ onBack, onSave }: OperatorSettingsScreenProps) {
   // ── Perfil del operador ───────────────────────────────────────
-  const [name,         setName]         = useState('');
+  const [nombres,      setNombres]      = useState('');
+  const [apellidos,    setApellidos]    = useState('');
   const [phone,        setPhone]        = useState('');
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [saving,       setSaving]       = useState(false);
@@ -38,7 +40,8 @@ export function OperatorSettingsScreen({ onBack, onSave }: OperatorSettingsScree
       if (error) {
         toast.error('No se pudo cargar el perfil');
       } else if (data) {
-        setName( data.full_name ?? '');
+        setNombres(data.nombres ?? data.full_name ?? '');
+        setApellidos(data.apellidos ?? '');
         setPhone(data.phone     ?? '');
       }
       setLoadingProfile(false);
@@ -48,11 +51,16 @@ export function OperatorSettingsScreen({ onBack, onSave }: OperatorSettingsScree
 
   // ── Guardar perfil en Supabase ────────────────────────────────
   const handleSave = async () => {
-    setSaving(true);
     setSaved(false);
 
+    if (validarNombrePersona(nombres, 'nombres') || validarNombrePersona(apellidos, 'apellidos')) {
+      toast.error('Revisa tu nombre', { description: validarNombrePersona(nombres, 'nombres') ?? validarNombrePersona(apellidos, 'apellidos') ?? '' });
+      return;
+    }
+    setSaving(true);
     const { error } = await updateUserProfile('', {
-      full_name: name.trim() || null,
+      nombres:   nombres.trim().replace(/\s+/g, ' '),
+      apellidos: apellidos.trim().replace(/\s+/g, ' '),
       phone:     phone.trim() || null,
     });
 
@@ -120,16 +128,15 @@ export function OperatorSettingsScreen({ onBack, onSave }: OperatorSettingsScree
               </div>
             ) : (
               <div className="space-y-4">
-                <div>
-                  <Label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                    Nombre completo
-                  </Label>
-                  <Input
-                    value={name}
-                    onChange={e => setName(e.target.value)}
-                    placeholder="Tu nombre"
-                    className="mt-1.5"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="op-nombres" className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Nombres</Label>
+                    <Input id="op-nombres" value={nombres} onChange={e => setNombres(e.target.value)} placeholder="Tus nombres" className="mt-1.5" maxLength={60} />
+                  </div>
+                  <div>
+                    <Label htmlFor="op-apellidos" className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Apellidos</Label>
+                    <Input id="op-apellidos" value={apellidos} onChange={e => setApellidos(e.target.value)} placeholder="Tus apellidos" className="mt-1.5" maxLength={60} />
+                  </div>
                 </div>
                 <div>
                   <Label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">

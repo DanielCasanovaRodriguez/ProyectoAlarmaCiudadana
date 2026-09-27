@@ -6,6 +6,7 @@ import {
   Activity, 
   Settings,
   ScrollText,
+  IdCard,
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
@@ -30,9 +31,15 @@ export function AdminSidebar({ currentSection, onSectionChange, userRole }: Admi
     },
     { 
       id: 'users', 
-      label: 'Usuarios y Roles', 
+      label: 'Usuarios y Roles',
       icon: Users,
       roles: ['admin']
+    },
+    {
+      id: 'identidad',
+      label: 'Verificación de identidad',
+      icon: IdCard,
+      roles: ['admin', 'auditor']
     },
     { 
       id: 'alerts', 

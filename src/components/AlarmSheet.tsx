@@ -22,6 +22,8 @@ interface AlarmSheetProps {
   //   2. Subir archivos con el ID real
   //   3. Actualizar media_urls en la alerta
   onCreateAlert: (type: Alert['type'], description: string, files: File[]) => Promise<void>;
+  /** Si el usuario no puede reportar (identidad sin verificar o rechazada). */
+  bloqueo?: { mensaje: string; onVerificar: () => void } | null;
 }
 
 const alertTypes = [
@@ -66,7 +68,7 @@ const alertTypes = [
 // COMPONENTE
 // ================================================================
 
-export function AlarmSheet({ isOpen, onClose, onCreateAlert }: AlarmSheetProps) {
+export function AlarmSheet({ isOpen, onClose, onCreateAlert, bloqueo }: AlarmSheetProps) {
   const [selectedType,  setSelectedType]  = useState<Alert['type'] | null>(null);
   const [description,   setDescription]   = useState('');
   const [isSubmitting,  setIsSubmitting]  = useState(false);
@@ -236,6 +238,20 @@ export function AlarmSheet({ isOpen, onClose, onCreateAlert }: AlarmSheetProps) 
             </div>
           </div>
 
+          {/* Identidad sin verificar: no puede reportar */}
+          {bloqueo && (
+            <div className="mx-6 mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 flex flex-col gap-2" role="alert">
+              <p className="text-sm text-amber-900">{bloqueo.mensaje}</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" onClick={bloqueo.onVerificar}
+                  className="rounded-lg bg-blue-600 text-white text-sm font-semibold py-2">Verificar ahora</button>
+                <a href="tel:123" className="inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 text-white text-sm font-semibold py-2">
+                  <Phone className="w-4 h-4" aria-hidden /> Llamar al 123
+                </a>
+              </div>
+            </div>
+          )}
+
           {/* Sin conexión: la alerta no puede llegar al servidor */}
           {!online && (
             <div className="mx-6 mb-3 rounded-xl border border-red-200 bg-red-50 p-3 flex flex-col gap-2" role="alert">
@@ -267,7 +283,7 @@ export function AlarmSheet({ isOpen, onClose, onCreateAlert }: AlarmSheetProps) 
             </Button>
             <HoldToConfirmButton
               onConfirm={handleSubmit}
-              disabled={!selectedType || isSubmitting || !online}
+              disabled={!selectedType || isSubmitting || !online || !!bloqueo}
               className="flex-1 bg-red-500 hover:bg-red-600 text-white"
             >
               {isSubmitting ? (

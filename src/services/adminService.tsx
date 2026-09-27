@@ -379,12 +379,12 @@ export async function updateUser(
 
 export async function createUser(
   _accessToken: string,
-  userData: { name: string; email: string; password: string; role: string; status: string; }
+  userData: { nombres: string; apellidos: string; email: string; password: string; role: string; status: string; }
 ): Promise<{ data: any | null; error: string | null }> {
   try {
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email: userData.email, password: userData.password,
-      options: { data: { full_name: userData.name, role: userData.role } },
+      options: { data: { nombres: userData.nombres, apellidos: userData.apellidos, full_name: `${userData.nombres} ${userData.apellidos}` } },
     });
 
     if (authError) return { data: null, error: toUserMessage(authError) };
@@ -394,7 +394,7 @@ export async function createUser(
     const { error: updateError } = await supabase
       .from('profiles')
       .update({
-        full_name: userData.name, role: userData.role as UserRole,
+        nombres: userData.nombres, apellidos: userData.apellidos, role: userData.role as UserRole,
         status: userData.status as UserStatus, updated_at: new Date().toISOString(),
       })
       .eq('id', authData.user.id);

@@ -18,6 +18,7 @@ interface MainMapScreenProps {
   onNavigateToHistory: () => void;
   onNavigateToProfile: () => void;
   onNavigateToTutorial:() => void;
+  bloqueoReporte?:      { mensaje: string; onVerificar: () => void } | null;
 }
 
 // ================================================================
@@ -33,6 +34,7 @@ export function MainMapScreen({
   onNavigateToHistory,
   onNavigateToProfile,
   onNavigateToTutorial,
+  bloqueoReporte,
 }: MainMapScreenProps) {
   const [isAlarmSheetOpen, setIsAlarmSheetOpen] = useState(false);
   const [isMenuOpen,       setIsMenuOpen]       = useState(false);
@@ -168,6 +170,7 @@ export function MainMapScreen({
         isOpen={isAlarmSheetOpen}
         onClose={() => setIsAlarmSheetOpen(false)}
         onCreateAlert={handleCreateAlert}
+        bloqueo={bloqueoReporte}
       />
     </div>
   );

@@ -6,7 +6,8 @@
 // push por Firebase Cloud Messaging (API HTTP v1) a los dispositivos en
 // `device_tokens`.
 //
-//   INSERT            → operadores y administradores activos
+//   INSERT            → operadores y administradores activos, y personas
+//                       a 1 km o menos de la alerta (usuarios_cercanos)
 //   UPDATE de estado  → el ciudadano que creó la alerta
 //
 // Secrets requeridos (supabase secrets set ...), nunca en el código:
@@ -80,25 +81,41 @@ async function getAccessToken(sa: { client_email: string; private_key: string })
   return cachedToken.value;
 }
 
-async function enviarPush(tokens: string[], titulo: string, mensaje: string, data: Record<string, string>) {
+type Aviso = { user_id: string; titulo: string; mensaje: string; data: Record<string, string> };
+
+/** Envía un mensaje FCM a cada dispositivo de cada destinatario (mensaje propio por usuario). */
+async function enviarAvisos(avisos: Aviso[]) {
+  if (avisos.length === 0) return { enviados: 0, invalidos: [] as string[], destinatarios: 0 };
+
+  // Bandeja de notificaciones dentro de la app (web y Android)
+  await supabase.from('notificaciones').insert(avisos.map(a => ({
+    usuario_id: a.user_id, alerta_id: a.data.alert_id ?? null, titulo: a.titulo, mensaje: a.mensaje,
+  })));
+
   const raw = Deno.env.get('FIREBASE_SERVICE_ACCOUNT');
-  if (!raw || tokens.length === 0) return { enviados: 0, invalidos: [] as string[] };
+  if (!raw) return { enviados: 0, invalidos: [] as string[], destinatarios: avisos.length };
   const sa = JSON.parse(raw);
   const accessToken = await getAccessToken(sa);
   const url = `https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`;
 
+  const { data: filas } = await supabase.from('device_tokens').select('user_id, token')
+    .in('user_id', avisos.map(a => a.user_id));
+  const porUsuario = new Map(avisos.map(a => [a.user_id, a]));
+
   const invalidos: string[] = [];
   let enviados = 0;
-  await Promise.all(tokens.map(async (token) => {
+  await Promise.all((filas ?? []).map(async ({ user_id, token }) => {
+    const aviso = porUsuario.get(user_id);
+    if (!aviso) return;
     const res = await fetch(url, {
       method: 'POST',
       headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message: {
           token,
-          notification: { title: titulo, body: mensaje },
-          data,
-          android: { priority: 'HIGH', notification: { channel_id: 'alertas' } },
+          notification: { title: aviso.titulo, body: aviso.mensaje },
+          data: aviso.data,
+          android: { priority: 'HIGH', notification: { channel_id: 'alertas', default_sound: true } },
         },
       }),
     });
@@ -109,7 +126,11 @@ async function enviarPush(tokens: string[], titulo: string, mensaje: string, dat
   }));
 
   if (invalidos.length) await supabase.from('device_tokens').delete().in('token', invalidos);
-  return { enviados, invalidos };
+  return { enviados, invalidos, destinatarios: avisos.length };
+}
+
+function distanciaTexto(m: number): string {
+  return m < 1000 ? `${Math.max(10, Math.round(m / 10) * 10)} m` : `${(m / 1000).toFixed(1).replace('.', ',')} km`;
 }
 
 // --------------------------------------------------------------- handler
@@ -123,34 +144,48 @@ Deno.serve(async (req) => {
   if (payload.table !== 'alerts' || !alerta) return new Response('ignorado', { status: 200 });
 
   const tipo = TIPOS[alerta.type_code] ?? alerta.type_code;
-  let destinatarios: string[] = [];
-  let titulo = '', mensaje = '';
+  const avisos: Aviso[] = [];
 
   if (payload.type === 'INSERT') {
-    const { data } = await supabase.from('profiles').select('id')
+    // 1. Personal: operadores y administradores activos
+    const { data: personal } = await supabase.from('profiles').select('id')
       .in('role', ['operator', 'admin']).eq('status', 'active');
-    destinatarios = (data ?? []).map(p => p.id);
-    titulo  = `🚨 Nueva alerta: ${tipo}`;
-    mensaje = alerta.description?.slice(0, 120) || 'Un ciudadano reportó una emergencia.';
+    const idsPersonal = new Set((personal ?? []).map(p => p.id));
+    for (const id of idsPersonal) {
+      if (id === alerta.user_id) continue;
+      avisos.push({
+        user_id: id,
+        titulo: `🚨 Nueva alerta: ${tipo}`,
+        mensaje: alerta.description?.slice(0, 120) || 'Un ciudadano reportó una emergencia.',
+        data: { alert_id: alerta.id, tipo: 'nueva', tipo_alerta: alerta.type_code },
+      });
+    }
+
+    // 2. Personas a 1 km o menos (última ubicación de las últimas 24 h, con avisos activos)
+    const { data: cercanos, error } = await supabase.rpc('usuarios_cercanos', {
+      p_alert_id: alerta.id, p_radio_m: 1000, p_horas: 24,
+    });
+    if (error) console.error('usuarios_cercanos', error.message);
+    for (const c of (cercanos ?? []) as { user_id: string; distancia_m: number }[]) {
+      if (idsPersonal.has(c.user_id)) continue; // ya recibe el aviso del personal
+      avisos.push({
+        user_id: c.user_id,
+        titulo: `⚠️ Alerta cerca de ti: ${tipo}`,
+        mensaje: `A ${distanciaTexto(c.distancia_m)} de tu ubicación. Toca para ver el detalle y el lugar.`,
+        data: { alert_id: alerta.id, tipo: 'cercana', tipo_alerta: alerta.type_code, distancia_m: String(c.distancia_m) },
+      });
+    }
   } else if (payload.type === 'UPDATE' && payload.old_record?.status !== alerta.status) {
-    destinatarios = [alerta.user_id];
-    titulo  = 'Actualización de tu alerta';
-    mensaje = `Tu reporte de ${tipo.toLowerCase()} está ahora: ${ESTADOS[alerta.status] ?? alerta.status}.`;
+    avisos.push({
+      user_id: alerta.user_id,
+      titulo: 'Actualización de tu alerta',
+      mensaje: `Tu reporte de ${tipo.toLowerCase()} está ahora: ${ESTADOS[alerta.status] ?? alerta.status}.`,
+      data: { alert_id: alerta.id, tipo: 'estado', estado: alerta.status },
+    });
   } else {
     return new Response('sin cambios relevantes', { status: 200 });
   }
 
-  if (destinatarios.length === 0) return new Response('sin destinatarios', { status: 200 });
-
-  // Registro en la bandeja de notificaciones de la app (web y Android)
-  await supabase.from('notificaciones').insert(destinatarios.map(uid => ({
-    usuario_id: uid, alerta_id: alerta.id, titulo, mensaje,
-  })));
-
-  const { data: tokens } = await supabase.from('device_tokens').select('token').in('user_id', destinatarios);
-  const resultado = await enviarPush((tokens ?? []).map(t => t.token), titulo, mensaje, {
-    alert_id: alerta.id, tipo: alerta.type_code, estado: alerta.status,
-  });
-
-  return Response.json({ destinatarios: destinatarios.length, ...resultado });
+  const resultado = await enviarAvisos(avisos);
+  return Response.json(resultado);
 });
