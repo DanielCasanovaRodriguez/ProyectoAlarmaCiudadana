@@ -35,7 +35,7 @@ import {
   obtenerMiIdentidad, obtenerEstadoReporte, identidadPermiteReportar,
   type MiIdentidad, type EstadoReporte,
 } from './services/identityService';
-import { reportarUbicacion, olvidarUbicacionEnviada, distanciaM, formatearDistancia } from './services/proximityService';
+import { reportarUbicacion, olvidarUbicacionEnviada, formatearDistancia } from './services/proximityService';
 import { getAlertTypeLabel } from './services/alertService';
 import { signUp } from './services/authService';
 import { Toaster } from './components/ui/sonner';
@@ -43,7 +43,7 @@ import { ConnectionBanner } from './components/ConnectionBanner';
 import { toast } from 'sonner';
 import {
   getUserAlertHistory,
-  getActiveAlerts,
+  getAlertasCercanas,
   createAlert as createAlertDB,
   updateAlertMediaUrls,
   cancelAlert as cancelAlertDB,
@@ -66,6 +66,8 @@ export interface Alert {
   description?: string;
   mediaUrls?:   string[];
   status?:      'open' | 'ack' | 'resolved';
+  /** Distancia en metros a la ubicación del usuario (alertas cercanas). */
+  distanciaM?:  number | null;
 }
 
 export type Screen =
@@ -146,6 +148,7 @@ function convertDbAlert(dbAlert: any): Alert {
     description: dbAlert.description,
     mediaUrls:   dbAlert.media_urls ?? [],
     status:      dbAlert.status,
+    distanciaM:  dbAlert.distancia_m ?? null,
   };
 }
 
@@ -222,73 +225,66 @@ export default function App() {
     return () => clearInterval(id);
   }, [appState.auth.isLoggedIn, appState.currentScreen]);
 
-  // ── E5: Cargar alertas activas del área para el mapa ────────────
-  // Solo se ejecuta cuando el ciudadano está en el mapa.
-  // Incluye alertas de TODOS los usuarios, no solo las propias.
-  // Usa Supabase Realtime para actualizaciones instantáneas entre usuarios
-  // + polling de respaldo cada 15 s.
+  // ── E5: Alertas a ≤ 5 km de la ubicación REAL del usuario ────────
+  // La BD filtra por distancia (PostGIS, paso 13): nunca se descarga el
+  // país entero. Se vuelve a consultar cada 15 s y cuando la persona se
+  // mueve más de ~200 m. Sin ubicación no hay "alertas cerca de ti".
+  const puntoConsulta = appState.userLocation
+    ? `${appState.userLocation.lat.toFixed(3)},${appState.userLocation.lng.toFixed(3)}`
+    : null;
+  const ubicacionRef = useRef(appState.userLocation);
+  ubicacionRef.current = appState.userLocation;
+
   useEffect(() => {
     if (!appState.auth.isLoggedIn || appState.currentScreen !== 'main-map') return;
+    if (!puntoConsulta) {
+      setAppState(prev => (prev.areaAlerts.length ? { ...prev, areaAlerts: [] } : prev));
+      return;
+    }
 
     let idsConocidos: Set<string> | null = null;
-    const loadAreaAlerts = async () => {
+    let cancelado = false;
+    const cargarCercanas = async () => {
+      const punto = ubicacionRef.current;
+      if (!punto) return;
       try {
-        const activas = await getActiveAlerts();
+        const cercanas = await getAlertasCercanas(punto.lat, punto.lng);
+        if (cancelado) return;
         setAppState(prev => {
-          // Aviso dentro de la app (web y Android abierta) si aparece una alerta
-          // nueva de otra persona a 1 km o menos.
-          if (idsConocidos && prev.userLocation) {
-            for (const a of activas as any[]) {
-              if (idsConocidos.has(a.id) || a.es_propia || prev.alerts.some(x => x.id === a.id)) continue;
-              const d = distanciaM(prev.userLocation, { lat: a.lat, lng: a.lng });
-              if (d <= 1000) {
-                toast.warning(`Alerta cercana: ${getAlertTypeLabel(a.type_code)}`, {
-                  description: `${formatearDistancia(d)?.replace(/^a /, 'A ')} de ti`,
-                  duration: 10_000,
-                  action: { label: 'Ver', onClick: () => setAppState(p => ({ ...p, nearbyAlertId: a.id, currentScreen: 'nearby-alert' })) },
-                });
-              }
+          // Aviso dentro de la app si aparece una alerta nueva de otra persona a ≤ 1 km
+          if (idsConocidos) {
+            for (const a of cercanas) {
+              if (idsConocidos.has(a.id) || a.es_propia || (a.distancia_m ?? Infinity) > 1000) continue;
+              toast.warning(`Alerta cercana: ${getAlertTypeLabel(a.type_code)}`, {
+                description: `${formatearDistancia(a.distancia_m)?.replace(/^a /, 'A ')} de ti`,
+                duration: 10_000,
+                action: { label: 'Ver', onClick: () => setAppState(p => ({ ...p, nearbyAlertId: a.id, currentScreen: 'nearby-alert' })) },
+              });
             }
           }
-          idsConocidos = new Set(activas.map((a: any) => a.id));
-          return { ...prev, areaAlerts: activas.map(convertDbAlert) };
+          idsConocidos = new Set(cercanas.map(a => a.id));
+          return { ...prev, areaAlerts: cercanas.map(convertDbAlert) };
         });
       } catch (error) {
-        console.error('Error cargando alertas del área:', error);
+        console.warn('Error cargando alertas cercanas:', error);
       }
     };
 
-    // Carga inicial inmediata
-    loadAreaAlerts();
+    cargarCercanas();
+    const intervalId = setInterval(cargarCercanas, 15_000);
 
-    // Polling de respaldo cada 15 s (por si Realtime falla)
-    const intervalId = setInterval(loadAreaAlerts, 15_000);
-
-    // ── Suscripción Realtime — actualizaciones instantáneas ────────
-    // Escucha INSERT, UPDATE y DELETE en la tabla alerts.
-    // Cuando cualquier usuario crea o modifica una alerta, todos los
-    // clientes en la pantalla del mapa reciben la actualización de inmediato.
+    // Cambios de las alertas propias llegan al instante (Realtime respeta RLS)
     const channel = supabase
-      .channel('public-area-alerts')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'alerts' },
-        (_payload) => {
-          // Recargar lista completa para mantener consistencia
-          loadAreaAlerts();
-        }
-      )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('✅ Realtime conectado — alertas del área');
-        }
-      });
+      .channel('alertas-cercanas')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'alerts' }, () => { cargarCercanas(); })
+      .subscribe();
 
     return () => {
+      cancelado = true;
       clearInterval(intervalId);
       supabase.removeChannel(channel);
     };
-  }, [appState.auth.isLoggedIn, appState.currentScreen]);
+  }, [appState.auth.isLoggedIn, appState.currentScreen, puntoConsulta]);
 
   // ── Historial de pantallas (botón atrás de Android) ─────────────
   // Pantallas raíz: "atrás" minimiza la app. Pantallas transitorias
@@ -989,9 +985,9 @@ export default function App() {
               });
               navigateToScreen('main-map');
             }}
-            onLocationDenied={(fallbackCoords) => {
+            onLocationDenied={() => {
+              // Sin ubicación real no se inventa una: el mapa queda para explorar
               updateAppState({
-                userLocation: fallbackCoords ?? null,
                 user: {
                   ...appState.user,
                   hasLocationPermission:  false,
@@ -1014,6 +1010,8 @@ export default function App() {
             onNavigateToHistory={() => navigateToScreen('alert-history')}
             onNavigateToProfile={() => navigateToScreen('profile')}
             onNavigateToTutorial={() => navigateToScreen('tutorial')}
+            onVerAlerta={(id) => setAppState(prev => ({ ...prev, nearbyAlertId: id, currentScreen: 'nearby-alert' }))}
+            onActivarUbicacion={() => navigateToScreen('location-permission')}
             bloqueoReporte={bloqueoReporte}
           />
         );

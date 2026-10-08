@@ -7,12 +7,20 @@ import { Alert } from '../App';
 // PROPS
 // ================================================================
 
+export interface AreaVisible { sur: number; oeste: number; norte: number; este: number }
+
 interface MapViewProps {
-  alerts:            Alert[];          // todas las alertas activas del área
+  alerts:            Alert[];          // alertas a mostrar (cercanas o de la zona explorada)
   ownActiveAlertIds: string[];         // IDs de las alertas propias del usuario
   userLocation:      { lat: number; lng: number } | null;
   /** Centra el mapa en este punto (p. ej. una alerta) en lugar de en el usuario. */
   center?:           { lat: number; lng: number } | null;
+  /** Radio de cercanía a dibujar alrededor del usuario (m). */
+  radioM?:           number;
+  /** La PERSONA movió o acercó el mapa (no los movimientos automáticos). */
+  onMovidoPorUsuario?: (area: AreaVisible, centro: { lat: number; lng: number }) => void;
+  /** Cambiar este número vuelve a centrar el mapa en el usuario y su radio. */
+  recentrar?:        number;
 }
 
 
@@ -36,8 +44,9 @@ const alertColors: Record<string, string> = {
   violence: '#A855F7',
 };
 
-// Bogotá como centro de referencia neutral
-const BOGOTA_CENTER: [number, number] = [4.7110, -74.0721];
+// Sin ubicación: vista de Colombia completa (no una ciudad en particular)
+const COLOMBIA_CENTER: [number, number] = [4.5709, -74.2973];
+const COLOMBIA_ZOOM = 5;
 
 // ================================================================
 // HELPERS
@@ -125,6 +134,11 @@ function buildPopupHtml(
     </div>`;
 }
 
+function formatDistance(m: number | null | undefined): string {
+  if (m == null) return '';
+  return m < 1000 ? ` · a ${Math.max(10, Math.round(m / 10) * 10)} m` : ` · a ${(Math.floor(m / 100) / 10).toFixed(1).replace('.', ',')} km`;
+}
+
 function formatTimeAgo(timestamp: Date): string {
   const minutes = Math.floor((Date.now() - timestamp.getTime()) / 60000);
   if (minutes < 1)  return 'Ahora mismo';
@@ -136,8 +150,15 @@ function formatTimeAgo(timestamp: Date): string {
 // COMPONENTE
 // ================================================================
 
-export function MapView({ alerts, ownActiveAlertIds, userLocation, center: centroFijo }: MapViewProps) {
+export function MapView({
+  alerts, ownActiveAlertIds, userLocation, center: centroFijo, radioM, onMovidoPorUsuario, recentrar,
+}: MapViewProps) {
   const centradoEnUsuarioRef = useRef(false);
+  const circuloRef     = useRef<any>(null);
+  // Los movimientos que hace el código (centrar, encuadrar) no cuentan como exploración
+  const automaticoRef  = useRef(false);
+  const onMovidoRef    = useRef(onMovidoPorUsuario);
+  onMovidoRef.current  = onMovidoPorUsuario;
   const mapRef         = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
   const markersRef     = useRef<any[]>([]);
@@ -148,9 +169,9 @@ export function MapView({ alerts, ownActiveAlertIds, userLocation, center: centr
 
   // ── Inicializar mapa una sola vez ────────────────────────────────
   useEffect(() => {
-    if (!document.getElementById('map-marker-styles')) {
+    if (!document.getElementById('map-marker-styles-v2')) {
       const style = document.createElement('style');
-      style.id = 'map-marker-styles';
+      style.id = 'map-marker-styles-v2';
       style.innerHTML = `
         @keyframes pulse {
           0%   { transform: scale(1);   opacity: 0.6; }
@@ -158,6 +179,8 @@ export function MapView({ alerts, ownActiveAlertIds, userLocation, center: centr
           100% { transform: scale(1);   opacity: 0.6; }
         }
         .leaflet-container { font-family: inherit; }
+        /* Zoom debajo del botón de menú de la pantalla del mapa */
+        .leaflet-top.leaflet-right { margin-top: 64px; }
       `;
       document.head.appendChild(style);
     }
@@ -169,13 +192,24 @@ export function MapView({ alerts, ownActiveAlertIds, userLocation, center: centr
         ? [centroFijo.lat, centroFijo.lng] as [number, number]
         : userLocation
         ? [userLocation.lat, userLocation.lng] as [number, number]
-        : BOGOTA_CENTER;
+        : COLOMBIA_CENTER;
 
       const map = L.map(mapRef.current, {
         center,
-        zoom:               15,
-        zoomControl:        true,
+        zoom:               centroFijo || userLocation ? 15 : COLOMBIA_ZOOM,
+        zoomControl:        false,
         attributionControl: true,
+      });
+      L.control.zoom({ position: 'topright', zoomInTitle: 'Acercar', zoomOutTitle: 'Alejar' }).addTo(map);
+
+      map.on('moveend', () => {
+        if (automaticoRef.current) { automaticoRef.current = false; return; }
+        const b = map.getBounds();
+        const c = map.getCenter();
+        onMovidoRef.current?.(
+          { sur: b.getSouth(), oeste: b.getWest(), norte: b.getNorth(), este: b.getEast() },
+          { lat: c.lat, lng: c.lng },
+        );
       });
 
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -238,13 +272,43 @@ export function MapView({ alerts, ownActiveAlertIds, userLocation, center: centr
       .addTo(map)
       .bindPopup('<strong>Tu ubicación</strong>');
 
+    // Círculo del radio de cercanía (lo que se considera "cerca de ti")
+    if (radioM) {
+      if (circuloRef.current) {
+        circuloRef.current.setLatLng([userLocation.lat, userLocation.lng]);
+      } else {
+        circuloRef.current = L.circle([userLocation.lat, userLocation.lng], {
+          radius: radioM, color: '#2563EB', weight: 1.5, opacity: 0.6,
+          fillColor: '#3B82F6', fillOpacity: 0.06, interactive: false,
+        }).addTo(map);
+      }
+    }
+
     // Centrar en el usuario solo la primera vez: con la ubicación en vivo no se
     // debe mover el mapa mientras la persona lo recorre.
     if (!centroFijo && !centradoEnUsuarioRef.current) {
-      map.setView([userLocation.lat, userLocation.lng], 15);
+      encuadrarUsuario();
     }
     centradoEnUsuarioRef.current = true;
   }, [userLocation]);
+
+  function encuadrarUsuario() {
+    const map = mapInstanceRef.current;
+    if (!map || !userLocation) return;
+    automaticoRef.current = true;
+    // Si el mapa ya estaba ahí no hay 'moveend': se libera la marca igual
+    setTimeout(() => { automaticoRef.current = false; }, 1200);
+    if (circuloRef.current) {
+      map.fitBounds(circuloRef.current.getBounds(), { padding: [12, 12], animate: true });
+    } else {
+      map.setView([userLocation.lat, userLocation.lng], 15);
+    }
+  }
+
+  // ── Volver a "mi ubicación" a pedido ─────────────────────────────
+  useEffect(() => {
+    if (recentrar) encuadrarUsuario();
+  }, [recentrar]);
 
   // ── Actualizar marcadores de alertas del área ────────────────────
   useEffect(() => {
@@ -282,7 +346,7 @@ export function MapView({ alerts, ownActiveAlertIds, userLocation, center: centr
       const marker = L.marker([lat, lng], { icon: alertIcon })
         .addTo(map)
         .bindPopup(
-          buildPopupHtml(label, color, alert.description, timeAgo, isOwn)
+          buildPopupHtml(label, color, alert.description, timeAgo + formatDistance(alert.distanciaM), isOwn)
         );
 
       markersRef.current.push(marker);
@@ -300,22 +364,6 @@ export function MapView({ alerts, ownActiveAlertIds, userLocation, center: centr
         style={{ zIndex: 0 }}
       />
 
-      {/* Chip de estado superior — centrado */}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] bg-white/95 backdrop-blur-md rounded-full shadow-lg border border-gray-200">
-        <div className="px-4 py-2 flex items-center gap-2.5">
-          <div className={`w-2 h-2 rounded-full animate-pulse flex-shrink-0 ${
-            userLocation ? 'bg-green-500' : 'bg-yellow-500'
-          }`} />
-          <p className="text-sm text-gray-800 whitespace-nowrap">
-            {userLocation ? 'Tu ubicación actual' : 'Ubicación no disponible'}
-          </p>
-          {alerts.length > 0 && (
-            <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-semibold rounded-full flex-shrink-0">
-              {alerts.length}
-            </span>
-          )}
-        </div>
-      </div>
     </div>
   );
 }

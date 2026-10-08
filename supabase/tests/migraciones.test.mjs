@@ -336,12 +336,13 @@ await prueba('otro ciudadano NO lee la alerta en la tabla', async () => {
   igual((await como(U.beto, `select * from public.alerts where id = $1`, [alertaAna])).rows.length, 0);
 });
 await prueba('otro ciudadano la ve en el mapa SIN user_id ni evidencias', async () => {
-  const r = await como(U.beto, `select * from public.alertas_activas_publicas()`);
+  // (paso 13: se consulta por cercanía; la alerta está en 4.62, -74.14)
+  const r = await como(U.beto, `select * from public.alertas_cercanas(4.62, -74.14)`);
   igual(r.rows.length, 1); igual('user_id' in r.rows[0], false, 'expone user_id:');
   igual(r.rows[0].es_propia, false); igual(r.rows[0].media_urls.length, 0);
 });
 await prueba('la autora la ve como propia', async () => {
-  igual((await como(U.ana, `select es_propia from public.alertas_activas_publicas()`)).rows[0].es_propia, true);
+  igual((await como(U.ana, `select es_propia from public.alertas_cercanas(4.62, -74.14)`)).rows[0].es_propia, true);
 });
 await prueba('la autora adjunta evidencias (media_urls)', async () => {
   await como(U.ana, `update public.alerts set media_urls = array['alertas/' || $1 || '/1.jpg'] where id = $1::uuid`, [alertaAna]);
@@ -800,6 +801,56 @@ await prueba('supresión: solo admin, solo ciudadanos, borra todo y conserva la 
   igual(s.user_id, null); igual(s.estado, 'cerrada');
   // la cédula queda libre para un registro nuevo
   await comoSistema(`insert into auth.users (id, email, raw_user_meta_data) values ('00000000-0000-0000-0000-0000000000fa', 'nuevo@test', '{"nombres":"N","apellidos":"N","cedula":"52000777","fecha_expedicion":"2010-01-01"}')`);
+});
+console.log('\n— Proximidad real: 5 km');
+// Medellín (lejos de las alertas de prueba de Bogotá). 1° de latitud ≈ 111 195 m (Haversine).
+const MED = { lat: 6.2442, lng: -75.5812 };
+const alNorte = (m) => MED.lat + m / 111195;
+let idsMed = {};
+await prueba('preparación: alertas en Medellín a 0,3 / 4,95 / 5,05 km', async () => {
+  idsMed.cerca  = await nuevaAlertaEn(U.ana, alNorte(300),  MED.lng);
+  idsMed.borde  = await nuevaAlertaEn(U.ana, alNorte(4950), MED.lng);
+  idsMed.fuera  = await nuevaAlertaEn(U.ana, alNorte(5050), MED.lng);
+});
+await prueba('desde Medellín: solo alertas ≤ 5 km, ordenadas por distancia (ninguna de Bogotá)', async () => {
+  const r = (await como(U.beto, `select id, distancia_m, lat from public.alertas_cercanas($1, $2)`, [MED.lat, MED.lng])).rows;
+  const ids = r.map(x => x.id);
+  igual(ids.includes(idsMed.cerca), true, 'a 300 m');
+  igual(ids.includes(idsMed.borde), true, 'a 4,95 km');
+  igual(ids.includes(idsMed.fuera), false, 'a 5,05 km');
+  igual(r.every(x => x.lat > 5.5), true, 'ninguna de Bogotá');
+  igual(r[0].id, idsMed.cerca, 'la más cercana primero');
+  igual(r.every(x => x.distancia_m <= 5000), true);
+});
+await prueba('el radio nunca supera 5 km aunque se pida más', async () => {
+  const ids = (await como(U.beto, `select id from public.alertas_cercanas($1, $2, 50000)`, [MED.lat, MED.lng])).rows.map(x => x.id);
+  igual(ids.includes(idsMed.fuera), false);
+});
+await prueba('desde Bogotá no aparecen las de Medellín', async () => {
+  const ids = (await como(U.beto, `select id from public.alertas_cercanas(4.62, -74.14)`)).rows.map(x => x.id);
+  igual(Object.values(idsMed).some(id => ids.includes(id)), false);
+});
+await prueba('exploración manual: alertas del área visible; área enorme rechazada', async () => {
+  const ids = (await como(U.beto, `select id from public.alertas_en_area($1, $2, $3, $4)`,
+    [MED.lat - 0.1, MED.lng - 0.1, MED.lat + 0.1, MED.lng + 0.1])).rows.map(x => x.id);
+  igual(ids.includes(idsMed.fuera), true, 'explorando sí se ve la de 5,05 km');
+  await debeFallar(como(U.beto, `select * from public.alertas_en_area(-4, -79, 12, -67)`), '22023');
+  await debeFallar(como('anon', `select * from public.alertas_cercanas($1, $2)`, [MED.lat, MED.lng]), '42501');
+});
+await prueba('no expone quién reportó ni evidencias ajenas', async () => {
+  const cols = (await como(U.beto, `select * from public.alertas_cercanas($1, $2)`, [MED.lat, MED.lng])).fields.map(f => f.name);
+  igual(cols.includes('user_id'), false);
+  const r = (await como(U.beto, `select media_urls, es_propia from public.alertas_cercanas($1, $2)`, [MED.lat, MED.lng])).rows;
+  igual(r.every(x => x.es_propia === false && x.media_urls.length === 0), true);
+});
+await prueba('función anterior (web publicada): ciudadano ve solo ≤ 5 km de su última ubicación', async () => {
+  await como(U.beto, `select public.actualizar_mi_ubicacion($1, $2, 10)`, [MED.lat, MED.lng]);
+  const ids = (await como(U.beto, `select id from public.alertas_activas_publicas()`)).rows.map(x => x.id);
+  igual(ids.includes(idsMed.cerca), true); igual(ids.includes(idsMed.fuera), false);
+  igual(ids.length, (await como(U.beto, `select id from public.alertas_cercanas($1, $2)`, [MED.lat, MED.lng])).rows.length);
+  // el personal sigue viendo todas
+  const todas = (await como(U.oper, `select id from public.alertas_activas_publicas()`)).rows.length;
+  igual(todas > ids.length, true);
 });
 await prueba('ya no se pueden subir fotos de cédula', async () => {
   await comoSistema(`insert into storage.buckets (id, name) values ('documentos-identidad', 'documentos-identidad') on conflict do nothing`);

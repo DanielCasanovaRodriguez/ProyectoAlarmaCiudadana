@@ -440,6 +440,15 @@ export interface Database {
     Views:          Record<string, never>;
     // RPC definidas en supabase/migrations/20260925000001_funciones_negocio.sql
     Functions: {
+      // Paso 13: proximidad real (≤ 5 km) y exploración del área visible
+      alertas_cercanas: {
+        Args: { p_lat: number; p_lng: number; p_radio_m?: number };
+        Returns: AlertaCercanaRow[];
+      };
+      alertas_en_area: {
+        Args: { p_sur: number; p_oeste: number; p_norte: number; p_este: number };
+        Returns: AlertaCercanaRow[];
+      };
       alertas_activas_publicas: {
         Args: Record<string, never>;
         Returns: {
@@ -509,4 +518,12 @@ export interface Database {
     Enums:          Record<string, never>;
     CompositeTypes: Record<string, never>;
   };
+}
+
+/** Alerta pública (sin user_id) con distancia al punto consultado. */
+export interface AlertaCercanaRow {
+  id: string; type_code: string; description: string | null; severity: number;
+  lat: number; lng: number; status: AlertStatus; media_urls: string[];
+  created_at: string; updated_at: string; resolved_at: string | null; es_propia: boolean;
+  distancia_m: number | null;
 }

@@ -71,6 +71,10 @@ const REGLAS: Array<{ test: (m: string, code: string, status?: number) => boolea
   // Validaciones del servidor (paso 10)
   { test: (m) => /fuera_de_colombia/.test(m), kind: 'validation',
     msg: 'Alerta Ciudadana solo recibe reportes ubicados en Colombia. Si estás en el exterior, comunícate con las autoridades locales.' },
+  { test: (m) => /area_muy_grande/.test(m), kind: 'validation',
+    msg: 'Acerca un poco más el mapa para buscar alertas en esa zona.' },
+  { test: (m) => /area_invalida/.test(m), kind: 'validation',
+    msg: 'No pudimos leer esa zona del mapa. Muévelo e intenta de nuevo.' },
   { test: (m) => /ubicacion_invalida/.test(m), kind: 'validation',
     msg: 'No pudimos leer tu ubicación. Activa el GPS e intenta de nuevo.' },
   { test: (m) => /descripcion_larga/.test(m), kind: 'validation',

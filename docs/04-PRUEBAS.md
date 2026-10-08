@@ -99,3 +99,13 @@ Las pruebas con inicio de sesión en el Supabase real necesitan credenciales, qu
 | Datos de producción compatibles con las nuevas validaciones (23 alertas) | ✅ |
 | `acceso-cedula` recuperar y verificar con cédula inexistente: respuesta genérica | ✅ |
 | Navegador (375 px): bienvenida con 123 y documentos legales, ventana de la política, inicio de sesión con un campo y su validación | ✅ |
+
+
+## Versión 1.5.0 (2026-10-08): proximidad real 5 km
+
+| Prueba | Resultado |
+|---|---|
+| `npm run test:db` (migraciones 1–13; proximidad: 0,3 / 4,95 km sí, 5,05 km no; Medellín ≠ Bogotá; radio máximo; área explorada; función anterior) | ✅ 88/88 |
+| `npm run test:unit` | ✅ 59/59 |
+| Producción: desde Medellín 0 alertas; centro de Bogotá 22 (igual que una consulta PostGIS directa); distancia PostGIS 1 800 m vs Haversine 1 801 m | ✅ |
+| Navegador (400 px): círculo de 5 km, contador y lista por distancia, "Buscar alertas en esta zona" al alejarse, volver a mi ubicación, estado sin ubicación con vista de Colombia | ✅ |

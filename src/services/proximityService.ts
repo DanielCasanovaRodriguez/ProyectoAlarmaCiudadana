@@ -85,7 +85,8 @@ export async function obtenerAlertaPublica(alertId: string): Promise<AlertaPubli
 export function formatearDistancia(m: number | null | undefined): string | null {
   if (m == null) return null;
   if (m < 1000) return `a ${Math.max(10, Math.round(m / 10) * 10)} m`;
-  return `a ${(m / 1000).toFixed(1).replace('.', ',')} km`;
+  // Se trunca (4 950 m → 4,9 km): nunca parece más lejos ni fuera del radio
+  return `a ${(Math.floor(m / 100) / 10).toFixed(1).replace('.', ',')} km`;
 }
 
 export { distanciaM };
