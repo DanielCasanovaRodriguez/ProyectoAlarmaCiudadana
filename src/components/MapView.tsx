@@ -1,4 +1,5 @@
 import L from 'leaflet';
+import { escapeHtml } from '../utils/html';
 import React, { useEffect, useRef, useMemo } from 'react';
 import { Alert } from '../App';
 
@@ -116,11 +117,11 @@ function buildPopupHtml(
   return `
     <div style="padding:8px;min-width:160px;">
       ${badge}
-      <strong style="color:${color};font-size:13px;">${label}</strong>
+      <strong style="color:${color};font-size:13px;">${escapeHtml(label)}</strong>
       ${description
-        ? `<p style="margin:6px 0 0;font-size:12px;color:#555;">${description}</p>`
+        ? `<p style="margin:6px 0 0;font-size:12px;color:#555;">${escapeHtml(description)}</p>`
         : ''}
-      <p style="margin:4px 0 0;font-size:11px;color:#888;">${timeText}</p>
+      <p style="margin:4px 0 0;font-size:11px;color:#888;">${escapeHtml(timeText)}</p>
     </div>`;
 }
 

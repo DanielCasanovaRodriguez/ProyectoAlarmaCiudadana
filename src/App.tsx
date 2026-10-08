@@ -12,6 +12,10 @@ import { TutorialScreen } from './components/screens/TutorialScreen';
 import { EmergencyContactScreen } from './components/screens/EmergencyContactScreen';
 import { AboutAppScreen } from './components/screens/AboutAppScreen';
 import { PrivacyPolicyScreen } from './components/screens/PrivacyPolicyScreen';
+import { LegalScreen } from './components/legal/LegalDocument';
+import { MisDerechosScreen } from './components/screens/MisDerechosScreen';
+import { obtenerMiConsentimiento } from './services/legalService';
+import { POLITICA_VERSION } from './config/legal';
 import { LoginScreen } from './components/screens/LoginScreen';
 import { RegisterScreen } from './components/screens/RegisterScreen';
 import { EmailVerificationScreen } from './components/screens/EmailVerificationScreen';
@@ -85,6 +89,8 @@ export type Screen =
   | 'emergency-contact'
   | 'about-app'
   | 'privacy-policy'
+  | 'terms'
+  | 'mis-derechos'
   | 'operator-login'
   | 'operator-registration'
   | 'operator-dashboard'
@@ -120,6 +126,8 @@ export interface AppState {
   registerError:       string | null;
   // Antiabuso: bloqueo temporal por reportes falsos
   estadoReporte:       EstadoReporte | null;
+  // Versión de la política aceptada (undefined = aún no consultada)
+  consentimiento:      string | null | undefined;
   // Verificación de identidad del usuario (undefined = aún no consultada)
   identidad:           MiIdentidad | null | undefined;
   // Alerta cercana abierta desde una notificación
@@ -182,6 +190,7 @@ export default function App() {
     pendingRegistration: null,
     registerError:       null,
     estadoReporte:       null,
+    consentimiento:      undefined,
     identidad:           undefined,
     nearbyAlertId:       null,
   });
@@ -497,8 +506,12 @@ export default function App() {
   // ── Verificación de identidad del ciudadano ─────────────────────
   const refrescarIdentidad = async () => {
     try {
-      const [i, e] = await Promise.all([obtenerMiIdentidad(), obtenerEstadoReporte().catch(() => null)]);
-      setAppState(prev => ({ ...prev, identidad: i, estadoReporte: e }));
+      const [i, e, c] = await Promise.all([
+        obtenerMiIdentidad(),
+        obtenerEstadoReporte().catch(() => null),
+        obtenerMiConsentimiento().catch(() => undefined),
+      ]);
+      setAppState(prev => ({ ...prev, identidad: i, estadoReporte: e, consentimiento: c }));
       return i;
     } catch {
       return undefined; // sin conexión: se consulta más tarde
@@ -512,13 +525,22 @@ export default function App() {
   // Cuentas creadas antes de la cédula (sin cédula o sin fecha de expedición):
   // al abrir la app se les pide completarla antes de continuar. No aplica al
   // personal (el servidor ya les permite reportar: puede_reportar = true).
-  const cedulaPendiente = appState.identidad !== undefined
+  // Primero la autorización de datos (Ley 1581): quien nunca la dio, o la dio
+  // para una versión anterior de la política, debe aceptarla para continuar.
+  const consentimientoPendiente = appState.consentimiento !== undefined
+    && appState.consentimiento !== POLITICA_VERSION;
+  const cedulaPendiente = !consentimientoPendiente
+    && appState.identidad !== undefined
     && !identidadPermiteReportar(appState.identidad)
     && appState.estadoReporte?.puede_reportar === false;
   useEffect(() => {
-    if (appState.currentScreen !== 'main-map' || !cedulaPendiente) return;
-    setAppState(prev => ({ ...prev, currentScreen: 'identity-form' }));
-  }, [appState.currentScreen, cedulaPendiente]);
+    if (appState.currentScreen !== 'main-map') return;
+    if (consentimientoPendiente) {
+      setAppState(prev => ({ ...prev, currentScreen: 'data-consent' }));
+    } else if (cedulaPendiente) {
+      setAppState(prev => ({ ...prev, currentScreen: 'identity-form' }));
+    }
+  }, [appState.currentScreen, consentimientoPendiente, cedulaPendiente]);
 
   const bloqueadoHasta = appState.estadoReporte?.bloqueado_hasta && new Date(appState.estadoReporte.bloqueado_hasta) > new Date()
     ? new Date(appState.estadoReporte.bloqueado_hasta) : null;
@@ -711,8 +733,13 @@ export default function App() {
   };
 
   const handleDataConsentAccept = () => {
-    updateAppState({ auth: { ...appState.auth, isLoggedIn: true } });
-    navigateToScreen('location-permission');
+    setAppState(prev => ({
+      ...prev,
+      consentimiento: POLITICA_VERSION,
+      auth: { ...prev.auth, isLoggedIn: true },
+      // Cuenta nueva: sigue el permiso de ubicación; cuenta existente: al mapa
+      currentScreen: prev.user.hasCompletedOnboarding ? 'main-map' : 'location-permission',
+    }));
   };
 
   const handleSendPasswordResetCode = (email: string) => {
@@ -732,6 +759,7 @@ export default function App() {
       identidad:           undefined,
       pendingRegistration: null,
       estadoReporte:       null,
+    consentimiento:      undefined,
       nearbyAlertId:       null,
       auth:            { isLoggedIn: false, email: '', password: '', resetEmail: '' },
       user:            { name: '', hasLocationPermission: false, hasCompletedOnboarding: false },
@@ -940,7 +968,9 @@ export default function App() {
         return (
           <DataConsentScreen
             userName={appState.user.name}
+            actualizacion={!!appState.consentimiento}
             onAccept={handleDataConsentAccept}
+            onCerrarSesion={handleLogout}
           />
         );
 
@@ -1024,6 +1054,8 @@ export default function App() {
             alert={appState.lastCreatedAlert!}
             onBackToMap={() => navigateToScreen('main-map')}
             onViewHistory={() => navigateToScreen('alert-history')}
+            nombreUsuario={appState.user.name}
+            onConfigurarContactos={() => navigateToScreen('emergency-contact')}
           />
         );
 
@@ -1038,6 +1070,8 @@ export default function App() {
             onNavigateToEmergencyContact={() => navigateToScreen('emergency-contact')}
             onNavigateToAbout={() => navigateToScreen('about-app')}
             onNavigateToPrivacy={() => navigateToScreen('privacy-policy')}
+            onNavigateToTerms={() => navigateToScreen('terms')}
+            onNavigateToDerechos={() => navigateToScreen('mis-derechos')}
             onLogout={handleLogout}
             identidad={appState.identidad}
             onVerificarIdentidad={() => navigateToScreen('identity-form')}
@@ -1055,6 +1089,17 @@ export default function App() {
 
       case 'privacy-policy':
         return <PrivacyPolicyScreen onBack={() => navigateToScreen('profile')} />;
+
+      case 'terms':
+        return <LegalScreen tipo="terminos" onBack={() => navigateToScreen('profile')} />;
+
+      case 'mis-derechos':
+        return (
+          <MisDerechosScreen
+            onBack={() => navigateToScreen('profile')}
+            onVerPolitica={() => navigateToScreen('privacy-policy')}
+          />
+        );
 
       case 'operator-login':
         return (

@@ -182,8 +182,13 @@ export function OTPVerificationScreen({
           <div className="text-center mb-8">
             <h2 className="text-gray-900 mb-2">Ingresa el código</h2>
             <p className="text-gray-600 mb-4">
-              Hemos enviado un código de verificación a<br />
-              <span className="text-gray-900 font-medium">{email}</span>
+              {email.includes('@') ? (
+                <>Hemos enviado un código de verificación a<br />
+                  <span className="text-gray-900 font-medium">{email}</span></>
+              ) : (
+                <>Si la cédula terminada en <span className="text-gray-900 font-medium">{email.slice(-4)}</span> está
+                  registrada, enviamos un código al correo de esa cuenta.</>
+              )}
             </p>
             
             {/* Instrucciones importantes */}

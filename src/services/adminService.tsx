@@ -1,5 +1,7 @@
 import { supabase } from '../utils/supabase/client';
+import { escapeHtml } from '../utils/html';
 import { toUserMessage } from '../utils/errors';
+import { APP_VERSION } from '../config/app';
 import type { Database } from '../types/database.types';
 import type { UserRole, UserStatus, AlertStatus } from '../types/database.types';
 
@@ -524,6 +526,9 @@ export async function getAlertById(
 
 /** Genera y abre el PDF de una alerta individual en una nueva ventana */
 export function printAlertPDF(alert: AdminAlert): void {
+  // Todo texto que viene de la BD (p. ej. la descripción escrita por el
+  // ciudadano) se escapa: evita inyectar HTML/JS en la sesión del admin.
+  const esc = escapeHtml;
   const tipo      = labelTipo(alert.type);
   const estado    = labelEstado(alert.status);
   const severidad = labelSeveridad(alert.severity);
@@ -545,7 +550,7 @@ export function printAlertPDF(alert: AdminAlert): void {
 <html lang="es">
 <head>
   <meta charset="UTF-8"/>
-  <title>Reporte de Alerta — ${alert.id.slice(0,8)}</title>
+  <title>Reporte de Alerta — ${esc(alert.id.slice(0,8))}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Segoe UI', Arial, sans-serif; color: #111; background: #fff; padding: 40px; }
@@ -556,7 +561,7 @@ export function printAlertPDF(alert: AdminAlert): void {
     .report-title { text-align: right; }
     .report-title h2 { font-size: 18px; font-weight: 700; color: #111; }
     .report-title p { font-size: 11px; color: #888; margin-top: 4px; }
-    .status-badge { display: inline-block; padding: 4px 14px; border-radius: 20px; font-size: 12px; font-weight: 700; color: #fff; background: ${statusColor[alert.status] ?? '#555'}; margin-bottom: 20px; }
+    .status-badge { display: inline-block; padding: 4px 14px; border-radius: 20px; font-size: 12px; font-weight: 700; color: #fff; background: ${statusColor[alert.status] ?? '#555555'}; margin-bottom: 20px; }
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
     .field { background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 12px 16px; }
     .field label { display: block; font-size: 10px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 5px; }
@@ -582,22 +587,22 @@ export function printAlertPDF(alert: AdminAlert): void {
     </div>
   </div>
 
-  <div class="id-box">ID: ${alert.id}</div>
-  <div class="status-badge">${estado.toUpperCase()}</div>
+  <div class="id-box">ID: ${esc(alert.id)}</div>
+  <div class="status-badge">${esc(estado.toUpperCase())}</div>
 
   <div class="section-title">Información General</div>
   <div class="grid">
     <div class="field highlight">
       <label>Tipo de Emergencia</label>
-      <value>${tipo}</value>
+      <value>${esc(tipo)}</value>
     </div>
     <div class="field">
       <label>Estado</label>
-      <value>${estado}</value>
+      <value>${esc(estado)}</value>
     </div>
     <div class="field">
       <label>Severidad</label>
-      <value>${severidad} (${alert.severity}/5)</value>
+      <value>${esc(severidad)} (${alert.severity}/5)</value>
     </div>
     <div class="field">
       <label>Anónima</label>
@@ -605,7 +610,7 @@ export function printAlertPDF(alert: AdminAlert): void {
     </div>
     <div class="field full">
       <label>Descripción</label>
-      <value>${alert.description || 'Sin descripción registrada'}</value>
+      <value>${esc(alert.description || 'Sin descripción registrada')}</value>
     </div>
   </div>
 
@@ -622,7 +627,7 @@ export function printAlertPDF(alert: AdminAlert): void {
     <div class="field full">
       <label>Ver en mapa</label>
       <value>${alert.latitude.toFixed(4)}, ${alert.longitude.toFixed(4)}</value>
-      <a href="${mapsUrl}" class="map-link">📍 Abrir en Google Maps</a>
+      <a href="${esc(mapsUrl)}" class="map-link">📍 Abrir en Google Maps</a>
     </div>
   </div>
 
@@ -651,22 +656,25 @@ export function printAlertPDF(alert: AdminAlert): void {
   <div class="section-title">Archivos Adjuntos</div>
   <div class="field full">
     <label>${alert.mediaUrls.length} archivo(s) adjunto(s)</label>
-    <value>${alert.mediaUrls.map((url: string, i: number) => `Archivo ${i + 1}: ${url}`).join('<br/>')}</value>
+    <value>${alert.mediaUrls.map((url: string, i: number) => `Archivo ${i + 1}: ${esc(url)}`).join('<br/>')}</value>
   </div>` : ''}
 
   <div class="footer">
-    <span>AlertaCiudadana Kennedy © ${new Date().getFullYear()} · Conforme a la Ley 1581/2012</span>
-    <span>ID Usuario Reportante: ${alert.userId.slice(0, 8)}…</span>
+    <span>Alerta Ciudadana © ${new Date().getFullYear()} · Conforme a la Ley 1581/2012</span>
+    <span>ID Usuario Reportante: ${esc(alert.userId.slice(0, 8))}…</span>
   </div>
 
-  <script>window.onload = () => { window.print(); }</script>
 </body>
 </html>`;
 
   const win = window.open('', '_blank', 'width=900,height=700');
   if (win) {
+    win.opener = null;
     win.document.write(html);
     win.document.close();
+    // Sin <script> en línea (lo bloquea la CSP): se imprime desde aquí
+    win.focus();
+    setTimeout(() => win.print(), 300);
   }
 }
 
@@ -820,7 +828,7 @@ export async function getSystemConfig(_accessToken?: string) {
 
     return {
       data: {
-        appName: 'AlertaCiudadana Kennedy', version: '1.0.0',
+        appName: 'Alerta Ciudadana', version: APP_VERSION,
         environment: 'production', timezone: 'America/Bogota', language: 'es-CO',
         totalAlertas: totalAlertas ?? 0, totalUsuarios: totalUsuarios ?? 0,
         tiposAlerta: tiposAlerta ?? 0, updatedAt: new Date().toISOString(),
@@ -843,7 +851,13 @@ export async function updateSystemConfig(_accessToken: string, _key: string, _va
 export function downloadCSV(data: any[], filename: string) {
   if (!data.length) return;
   const headers = Object.keys(data[0]);
-  const escape  = (v: any) => { const s = String(v ?? '').replace(/"/g, '""'); return s.includes(',') || s.includes('\n') ? `"${s}"` : s; };
+  // Comillas siempre y neutralización de fórmulas (=, +, -, @) para que un
+  // texto malicioso no se ejecute al abrir el CSV en Excel.
+  const escape  = (v: any) => {
+    let s = String(v ?? '');
+    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+    return `"${s.replace(/"/g, '""')}"`;
+  };
   const csv = [headers.join(','), ...data.map(row => headers.map(h => escape(row[h])).join(','))].join('\n');
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
   const url  = URL.createObjectURL(blob);

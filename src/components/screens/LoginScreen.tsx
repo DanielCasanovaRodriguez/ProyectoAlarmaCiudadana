@@ -19,9 +19,9 @@ interface LoginScreenProps {
 }
 
 /**
- * Ciudadanos: CÉDULA + contraseña (la cédula es el usuario).
- * Cuentas anteriores que aún no registran su cédula: pueden entrar con su
- * correo; la app les pide registrar la cédula después.
+ * Ciudadanos: un solo campo que acepta el NÚMERO DE CÉDULA o el CORREO,
+ * más la contraseña. Con cédula se usa la función acceso-cedula (límite de
+ * intentos, no revela el correo); con correo, Supabase Auth directamente.
  */
 export function LoginScreen({
   onBack,
@@ -30,16 +30,17 @@ export function LoginScreen({
   onNavigateToForgotPassword,
   onNavigateToCollaboratorPanel,
 }: LoginScreenProps) {
-  const [modo, setModo] = useState<'cedula' | 'correo'>('cedula');
-  const [cedula, setCedula] = useState('');
-  const [email, setEmail] = useState('');
+  const [usuario, setUsuario] = useState('');
+  const modo: 'cedula' | 'correo' = usuario.includes('@') ? 'correo' : 'cedula';
+  const cedula = usuario;
+  const email = usuario.trim().toLowerCase();
   const [password, setPassword] = useState('');
   const [codigo, setCodigo] = useState('');
   const [confirmando, setConfirmando] = useState<{ emailEnmascarado: string } | null>(null);
-  const [errors, setErrors] = useState<{ cedula?: string; email?: string; password?: string; codigo?: string; general?: string }>({});
+  const [errors, setErrors] = useState<{ usuario?: string; password?: string; codigo?: string; general?: string }>({});
   const [isLoading, setIsLoading] = useState(false);
 
-  const canSubmit = (modo === 'cedula' ? cedula.length > 0 : email.length > 0) && password.length > 0;
+  const canSubmit = usuario.trim().length > 0 && password.length > 0;
 
   /** Después de iniciar sesión: el personal debe usar el acceso de colaboradores (OTP). */
   const continuarConSesion = async (user: any, accessToken: string | undefined) => {
@@ -60,8 +61,12 @@ export function LoginScreen({
   };
 
   const ingresarConCedula = async () => {
+    if (/[a-z]/i.test(cedula)) {
+      setErrors({ usuario: 'Escribe tu número de cédula (solo números) o tu correo completo.' });
+      return;
+    }
     const e = validarNumeroCedula(cedula);
-    if (e) { setErrors({ cedula: e }); return; }
+    if (e) { setErrors({ usuario: e }); return; }
     if (!password) { setErrors({ password: 'Ingresa tu contraseña' }); return; }
     setIsLoading(true);
     try {
@@ -94,7 +99,7 @@ export function LoginScreen({
   };
 
   const ingresarConCorreo = async () => {
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setErrors({ email: 'Ingresa un correo válido' }); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setErrors({ usuario: 'Ingresa un correo válido' }); return; }
     if (!password) { setErrors({ password: 'Ingresa tu contraseña' }); return; }
     setIsLoading(true);
     try {
@@ -151,19 +156,14 @@ export function LoginScreen({
             <>
               <div className="text-center">
                 <h2 className="text-gray-900 mb-2">¡Bienvenido de nuevo!</h2>
-                <p className="text-gray-600">
-                  {modo === 'cedula' ? 'Ingresa con tu número de cédula' : 'Ingresa con el correo de tu cuenta'}
-                </p>
+                <p className="text-gray-600">Ingresa con tu número de cédula o con tu correo</p>
               </div>
 
               <div className="space-y-4">
-                {modo === 'cedula' ? (
-                  <AuthInput label="Número de cédula" value={cedula} onChange={setCedula} placeholder="1012345678"
-                    error={errors.cedula} required inputMode="numeric" maxLength={14} autoComplete="username" />
-                ) : (
-                  <AuthInput type="email" label="Correo electrónico" value={email} onChange={setEmail}
-                    placeholder="tu@email.com" error={errors.email} required autoComplete="email" />
-                )}
+                <AuthInput label="Cédula o correo electrónico" value={usuario}
+                  onChange={(v) => { setUsuario(v); setErrors(x => ({ ...x, usuario: undefined })); }}
+                  placeholder="1012345678 o tu@correo.com" error={errors.usuario} required
+                  maxLength={120} autoComplete="username" />
                 <AuthInput type="password" label="Contraseña" value={password} onChange={setPassword}
                   placeholder="Tu contraseña" error={errors.password} required autoComplete="current-password" />
                 <div className="text-right">
@@ -181,17 +181,6 @@ export function LoginScreen({
               >
                 {isLoading ? 'Iniciando sesión…' : 'Iniciar sesión'}
               </Button>
-
-              <div className="text-center">
-                <button
-                  onClick={() => { setModo(modo === 'cedula' ? 'correo' : 'cedula'); setErrors({}); }}
-                  className="text-sm text-gray-600 underline underline-offset-2"
-                >
-                  {modo === 'cedula'
-                    ? '¿Tu cuenta es anterior y aún no registras tu cédula? Ingresa con tu correo'
-                    : 'Ingresar con mi número de cédula'}
-                </button>
-              </div>
 
               <div className="text-center pt-2">
                 <p className="text-gray-600">

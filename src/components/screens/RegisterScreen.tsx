@@ -3,8 +3,9 @@ import { ArrowLeft, AlertCircle } from 'lucide-react';
 import { Button } from '../ui/button';
 import { AuthInput } from '../auth/AuthInput';
 import { AuthCheckbox } from '../auth/AuthCheckbox';
-import { validarNumeroCedula, validarNombrePersona, soloDigitosCedula, validarFechaExpedicion, hoyISO, FECHA_EXPEDICION_MINIMA } from '../../utils/cedula';
+import { validarNumeroCedula, validarNombrePersona, soloDigitosCedula, validarFechaExpedicion, hoyISO, FECHA_EXPEDICION_MINIMA, contieneDatoPersonal } from '../../utils/cedula';
 import { Lock } from 'lucide-react';
+import { LegalDialog, EnlaceLegal, type TipoDocumentoLegal } from '../legal/LegalDocument';
 
 /** Datos del formulario de registro. */
 export interface DatosRegistro {
@@ -45,6 +46,7 @@ export function RegisterScreen({ onBack, onNavigateToLogin, onContinuar, datosIn
   const [cedula,    setCedula]    = useState(datosIniciales?.cedula ?? '');
   const [fechaExp,  setFechaExp]  = useState(datosIniciales?.fechaExpedicion ?? '');
   const [enviando,  setEnviando]  = useState(false);
+  const [docLegal,  setDocLegal]  = useState<TipoDocumentoLegal | null>(null);
   const [email,     setEmail]     = useState(datosIniciales?.email ?? '');
   const [phone,     setPhone]     = useState(datosIniciales?.phone ?? '');
   const [password,  setPassword]  = useState('');
@@ -73,6 +75,7 @@ export function RegisterScreen({ onBack, onNavigateToLogin, onContinuar, datosIn
     if (!password) e.password = 'Ingresa una contraseña';
     else if (password.length < 8) e.password = 'La contraseña debe tener al menos 8 caracteres';
     else if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) e.password = 'Usa letras y números en tu contraseña';
+    else if (contieneDatoPersonal(password, cedula, fechaExp)) e.password = 'No uses tu cédula ni tu fecha de expedición en la contraseña';
 
     if (!confirmPassword) e.confirmPassword = 'Confirma tu contraseña';
     else if (password !== confirmPassword) e.confirmPassword = 'Las contraseñas no coinciden';
@@ -157,9 +160,11 @@ export function RegisterScreen({ onBack, onNavigateToLogin, onContinuar, datosIn
               error={errors.terms}
               label={
                 <span>
-                  Acepto los <span className="text-blue-600">Términos y Condiciones</span> y autorizo el tratamiento de mis
-                  datos personales, incluida mi cédula, conforme a la Ley 1581 de 2012 y la{' '}
-                  <span className="text-blue-600">Política de Privacidad</span>
+                  Soy mayor de edad, acepto los{' '}
+                  <EnlaceLegal tipo="terminos" onAbrir={setDocLegal}>Términos y Condiciones</EnlaceLegal> y autorizo de
+                  forma previa, expresa e informada el tratamiento de mis datos personales, incluida mi cédula, según la{' '}
+                  <EnlaceLegal tipo="privacidad" onAbrir={setDocLegal}>Política de Tratamiento de Datos</EnlaceLegal>{' '}
+                  (Ley 1581 de 2012).
                 </span>
               }
             />
@@ -184,6 +189,7 @@ export function RegisterScreen({ onBack, onNavigateToLogin, onContinuar, datosIn
           </div>
         </div>
       </div>
+      <LegalDialog tipo={docLegal} onClose={() => setDocLegal(null)} />
     </div>
   );
 }

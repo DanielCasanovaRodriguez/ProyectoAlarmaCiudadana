@@ -8,6 +8,10 @@
 //
 //   POST { accion: 'ingresar',  cedula, password }  → sesión de Supabase
 //   POST { accion: 'confirmar', cedula, codigo }    → confirma el correo y entra
+//   POST { accion: 'recuperar', cedula }            → envía el código para cambiar
+//                                                     la contraseña al correo de la cuenta
+//   POST { accion: 'verificar_recuperacion', cedula, codigo } → sesión para fijar
+//                                                     la nueva contraseña
 //
 // Seguridad:
 //  · El correo de la cuenta nunca se revela (solo enmascarado y únicamente
@@ -69,7 +73,9 @@ Deno.serve(async (req) => {
   let body: Record<string, unknown>;
   try { body = await req.json(); } catch { return responder(400, { error: 'Solicitud no válida.' }); }
 
-  const accion = body.accion === 'confirmar' ? 'confirmar' : 'ingresar';
+  const ACCIONES = ['ingresar', 'confirmar', 'recuperar', 'verificar_recuperacion'] as const;
+  const accion = ACCIONES.find(a => a === body.accion) ?? 'ingresar';
+  const conCodigo = accion === 'confirmar' || accion === 'verificar_recuperacion';
   const cedula = cedulaValida(body.cedula);
   const ip = (req.headers.get('x-forwarded-for') ?? '').split(',')[0].trim() || 'desconocida';
   if (!cedula) return responder(400, { error: 'Ingresa un número de cédula válido.' });
@@ -85,10 +91,14 @@ Deno.serve(async (req) => {
     const min = Math.ceil(fila.bloqueado_segundos / 60);
     return responder(429, { error: `Demasiados intentos fallidos. Por seguridad, espera ${min} minuto${min === 1 ? '' : 's'} e intenta de nuevo.` });
   }
+  // Recuperación: misma respuesta exista o no la cédula (no se puede usar
+  // para averiguar qué cédulas están registradas)
+  const MSG_RECUPERAR = 'Si la cédula está registrada, enviamos un código al correo de la cuenta. Revisa también la carpeta de spam.';
   if (!fila?.user_id) {
     await demora();
     await resultado(false);
-    return responder(401, { error: accion === 'confirmar' ? 'El código es incorrecto o expiró.' : MSG_GENERICO });
+    if (accion === 'recuperar') return responder(200, { ok: true, mensaje: MSG_RECUPERAR });
+    return conCodigo ? responder(400, { error: 'El código es incorrecto o expiró.' }) : responder(401, { error: MSG_GENERICO });
   }
 
   const { data: u, error: errU } = await servidor.auth.admin.getUserById(fila.user_id);
@@ -96,6 +106,25 @@ Deno.serve(async (req) => {
   if (errU || !email) { await demora(); await resultado(false); return responder(401, { error: MSG_GENERICO }); }
 
   const publico = nuevoClientePublico();
+
+  if (accion === 'recuperar') {
+    const { error } = await publico.auth.resetPasswordForEmail(email);
+    if (error && /rate limit|too many|security purposes/i.test(error.message)) {
+      return responder(429, { error: 'Ya enviamos un código hace poco. Espera un minuto e intenta de nuevo.' });
+    }
+    if (error) console.error('recuperar', error.message);
+    await demora();
+    return responder(200, { ok: true, mensaje: MSG_RECUPERAR });
+  }
+
+  if (accion === 'verificar_recuperacion') {
+    const codigo = typeof body.codigo === 'string' ? body.codigo.replace(/\D/g, '') : '';
+    if (codigo.length < 6 || codigo.length > 10) return responder(400, { error: 'Ingresa el código que te enviamos.' });
+    const { data, error } = await publico.auth.verifyOtp({ email, token: codigo, type: 'recovery' });
+    if (error || !data.session) { await resultado(false); return responder(400, { error: 'El código es incorrecto o expiró.' }); }
+    await resultado(true, fila.user_id);
+    return responder(200, sesion(data.session));
+  }
 
   // 2a. Confirmar correo con el código de 8 dígitos
   if (accion === 'confirmar') {

@@ -64,3 +64,17 @@ export function enmascararCedula(numero: string): string {
   const n = soloDigitosCedula(numero);
   return n.length <= 4 ? n : '•'.repeat(Math.min(6, n.length - 4)) + n.slice(-4);
 }
+
+/**
+ * La cédula y la fecha de expedición aparecen en documentos y fotocopias:
+ * no deben formar parte de la contraseña (en ningún orden de la fecha).
+ */
+export function contieneDatoPersonal(password: string, cedula: string, fecha: string): boolean {
+  const digitos = password.replace(/\D/g, '');
+  const ced = soloDigitosCedula(cedula);
+  if (ced.length >= 5 && digitos.includes(ced)) return true;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(fecha);
+  if (!m) return false;
+  const [, a, mes, d] = m;
+  return [`${a}${mes}${d}`, `${d}${mes}${a}`, `${mes}${d}${a}`].some(f => digitos.includes(f));
+}

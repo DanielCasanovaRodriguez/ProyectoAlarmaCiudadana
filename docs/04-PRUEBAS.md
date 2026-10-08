@@ -88,3 +88,14 @@ Las pruebas con inicio de sesión en el Supabase real necesitan credenciales, qu
 | APK 1.3.0 con R8 (3,7 MB) en emulador: arranca, plugins funcionan, selector de fecha nativo sin fechas futuras | ✅ |
 | Registro y acceso con una cédula y correo reales | ⏳ Responsable |
 | Push con la app cerrada | ⏳ Requiere Firebase |
+
+
+## Versión 1.4.0 (2026-10-08): interventoría
+
+| Prueba | Resultado |
+|---|---|
+| `npm run test:db` (migraciones 1–12) | ✅ 81/81 |
+| `npm run test:unit` (errores, cédula, interventoría: XSS, teléfonos, líneas de Colombia, contraseña) | ✅ 59/59 |
+| Datos de producción compatibles con las nuevas validaciones (23 alertas) | ✅ |
+| `acceso-cedula` recuperar y verificar con cédula inexistente: respuesta genérica | ✅ |
+| Navegador (375 px): bienvenida con 123 y documentos legales, ventana de la política, inicio de sesión con un campo y su validación | ✅ |

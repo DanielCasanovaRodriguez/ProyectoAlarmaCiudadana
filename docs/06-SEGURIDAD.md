@@ -49,3 +49,38 @@
 | CAPTCHA en registro (opcional) | Frena bots de registro | Supabase Auth → Bot protection (Cloudflare Turnstile) |
 | PostGIS en esquema público / `spatial_ref_sys` | Mover PostGIS rompe la columna `geom`; sin datos de usuarios | Aceptado |
 | Validar cédula contra la Registraduría | No existe API pública gratuita; proveedores de pago (KYC) | Evaluar a futuro |
+
+
+---
+
+# Interventoría v1.4.0 (2026-10-08)
+
+## Hallazgos y correcciones
+
+| # | Severidad | Hallazgo | Corrección |
+|---|---|---|---|
+| 1 | **Crítica** | **XSS almacenado en los mapas**: la descripción de una alerta (escrita por cualquier ciudadano) se insertaba como HTML en los popups de Leaflet del mapa ciudadano y del mapa del operador. Permitía ejecutar código en el celular de los usuarios cercanos y en la sesión del personal (en Android no hay CSP que lo frene). | `src/utils/html.ts` (`escapeHtml`) en todo dato dinámico de los popups. Pruebas unitarias. |
+| 2 | **Crítica** | **XSS en el reporte imprimible del administrador** (`printAlertPDF`): la descripción iba sin escapar a una ventana del mismo origen (acceso a la sesión del admin). | Todo texto escapado; sin script en línea; `window.opener` anulado. |
+| 3 | Alta | **Inyección de fórmulas en CSV** (auditoría y reportes). | Celdas entre comillas y neutralización de `= + - @`. |
+| 4 | Alta | Al crear una alerta, el ciudadano podía fijar campos internos (fecha, operador, marca de falsa, fechas de atención). | Trigger `validar_alerta` (paso 10): los fija el servidor. |
+| 5 | Alta | El autor podía quitar la marca de alerta falsa de su alerta abierta. | `proteger_campos_alerta` protege `marcada_falsa`. |
+| 6 | Alta | `media_urls` aceptaba cualquier URL externa. | Solo `alertas/<id de la alerta>/…` del bucket propio; máximo 10. |
+| 7 | Media | Sin límite de descripción ni validación de coordenadas. | Máx. 1000 caracteres; coordenadas válidas dentro de Colombia. |
+| 8 | Alta | **Afirmaciones falsas** en "Acerca de": alianza con la Policía Nacional, ISO 27001, reconocimiento MinTIC, "partner" de la Cruz Roja, línea 01-8000, correo y web inexistentes, "respuesta < 2 min". | Pantalla reescrita solo con hechos verificables. |
+| 9 | Alta | **911** en la confirmación de alerta. | Línea 123 y líneas oficiales de Colombia con enlace para llamar. |
+| 10 | Alta | La app prometía notificar automáticamente a los contactos de emergencia: **ese envío no existía**. | Texto veraz y función real: avisar por SMS, WhatsApp o llamada con un toque (mensaje + ubicación). |
+| 11 | Alta | **La autorización de datos no se guardaba** (sin prueba, Decreto 1377 art. 8). | `aceptar_politica` con versión, fecha y auditoría; se pide a quien no la tenga o tenga una versión anterior. |
+| 12 | Alta | Sin canal para los derechos del titular (Ley 1581, arts. 14-15). | "Mis datos y derechos" con plazo legal calculado; panel del admin con vencimientos y supresión completa con constancia. |
+| 13 | Media | Política incompleta, correo inventado, citas legales incorrectas y Términos sin documento. | Política y Términos completos (`src/legal/documentos.tsx`). |
+| 14 | Media | Fotos de cédulas del escaneo anterior guardadas sin finalidad. | Eliminadas (4 fotos, 2 registros) y funciones retiradas (paso 12). |
+| 15 | Media | Función heredada `make-server-1c8cef82` activa, sin código fuente, con rutas `/admin/*`. | Eliminada. |
+| 16 | Media | La verificación del código de recuperación respondía 400/401 según existiera la cédula. | Respuesta idéntica. |
+| 17 | Baja | La contraseña podía contener la cédula o la fecha de expedición. | Rechazado en el registro. |
+| 18 | Baja | Casilla de aceptación no accesible. | `role="checkbox"` y `aria-checked`. |
+
+## Acceso
+- Un solo campo: **cédula o correo** + contraseña. Con cédula → `acceso-cedula` (límite de intentos, no revela el correo); con correo → Supabase Auth.
+- Recuperación con cédula o correo: con cédula el código llega al correo de la cuenta y la respuesta es igual exista o no.
+
+## Migraciones nuevas (aplicadas en producción)
+`20261008000010_interventoria_legal_alertas.sql` · `20261008000011_supresion_titular.sql` · `20261008000012_retiro_escaneo_identidad.sql`

@@ -234,6 +234,12 @@ const nuevaAlerta = async (uid, tipo = 'robbery', lat = 4.62) => {
     [uid, tipo, lat])).rows[0].id;
 };
 
+const nuevaAlertaEn = async (uid, lat, lng) => {
+  await espaciar(uid);
+  return (await como(uid, `insert into public.alerts (user_id, type_code, lat, lng) values ($1,'robbery',$2,$3) returning id`,
+    [uid, lat, lng])).rows[0].id;
+};
+
 // ------------------------------------------------------------------ montaje
 await db.exec(SUPABASE_STUB);
 await db.exec(ESQUEMA_PRODUCCION);
@@ -338,8 +344,8 @@ await prueba('la autora la ve como propia', async () => {
   igual((await como(U.ana, `select es_propia from public.alertas_activas_publicas()`)).rows[0].es_propia, true);
 });
 await prueba('la autora adjunta evidencias (media_urls)', async () => {
-  await como(U.ana, `update public.alerts set media_urls = array['alertas/x/1.jpg'] where id = $1`, [alertaAna]);
-  igual((await comoSistema(`select media_urls from public.alerts where id = $1`, [alertaAna])).rows[0].media_urls[0], 'alertas/x/1.jpg');
+  await como(U.ana, `update public.alerts set media_urls = array['alertas/' || $1 || '/1.jpg'] where id = $1::uuid`, [alertaAna]);
+  igual((await comoSistema(`select media_urls from public.alerts where id = $1`, [alertaAna])).rows[0].media_urls[0], `alertas/${alertaAna}/1.jpg`);
 });
 await prueba('la autora NO cambia estado ni ubicación directamente (ni deja historial falso)', async () => {
   await como(U.ana, `update public.alerts set status = 'resolved', lat = 0 where id = $1`, [alertaAna]);
@@ -481,7 +487,14 @@ await prueba('un cliente antiguo que solo envía full_name sigue funcionando', a
 
 console.log('\nEscaneo de cédula (retirado en el paso 8)');
 await prueba('la función de escaneo ya no se puede usar desde la app', async () => {
-  await debeFallar(como(U.beto, `select * from public.registrar_identidad('1012345678','amarilla','pdf417',true,true,null,'a','b')`), '42501');
+  // Paso 8: sin permiso (42501). Paso 12: la función ya no existe (42883).
+  await debeFallar(como(U.beto, `select * from public.registrar_identidad('1012345678','amarilla','pdf417',true,true,null,'a','b')`));
+});
+await prueba('paso 12: sin funciones ni datos del escaneo', async () => {
+  const r = await comoSistema(`select count(*)::int n from pg_proc where pronamespace = 'public'::regnamespace
+    and proname in ('registrar_identidad','mi_identidad','admin_listar_identidades','admin_detalle_identidad','revisar_identidad')`);
+  igual(r.rows[0].n, 0);
+  igual((await comoSistema(`select count(*)::int n from public.verificaciones_identidad`)).rows[0].n, 0);
 });
 
 console.log('\nAlertas cercanas (1 km)');
@@ -700,6 +713,97 @@ await prueba('si el aviso no puede enviarse (URL configurada sin pg_net), la ale
   igual((await comoSistema(`select count(*)::int n from public.alerts where id = $1`, [id])).rows[0].n, 1);
   await como(U.oper, `select public.cambiar_estado_alerta($1, 'ack')`, [id]);
   await comoSistema(`delete from private.config where clave = 'webhook_url'`);
+});
+
+console.log('\n— Interventoría: validación de alertas, autorización de datos y habeas data');
+await como(U.ana, `select public.registrar_mi_cedula('52000999', '2001-02-03')`);
+await prueba('el ciudadano no fija campos internos al crear una alerta', async () => {
+  await espaciar(U.ana);
+  const r = await como(U.ana, `insert into public.alerts (user_id, type_code, lat, lng, created_at, marcada_falsa, operador_asignado_id)
+    values ($1, 'robbery', 4.62, -74.14, now() - interval '30 days', true, $2) returning id`, [U.ana, U.oper]);
+  const a = (await comoSistema(`select created_at > now() - interval '1 minute' reciente, marcada_falsa, operador_asignado_id
+    from public.alerts where id = $1`, [r.rows[0].id])).rows[0];
+  igual(a.reciente, true); igual(a.marcada_falsa, false); igual(a.operador_asignado_id, null);
+});
+await prueba('alerta fuera de Colombia rechazada', async () => {
+  await espaciar(U.ana);
+  await debeFallar(como(U.ana, `insert into public.alerts (user_id, type_code, lat, lng) values ($1, 'robbery', 37.42, -122.08)`, [U.ana]), '22023');
+});
+await prueba('alertas en San Andrés y Leticia sí se aceptan', async () => {
+  await nuevaAlertaEn(U.ana, 12.58, -81.70);
+  await nuevaAlertaEn(U.ana, -4.21, -69.94);
+});
+await prueba('descripción de más de 1000 caracteres rechazada; espacios se recortan', async () => {
+  await espaciar(U.ana);
+  await debeFallar(como(U.ana, `insert into public.alerts (user_id, type_code, lat, lng, description) values ($1, 'robbery', 4.62, -74.14, repeat('a', 1001))`, [U.ana]), '22001');
+  const id = await nuevaAlerta(U.ana);
+  await como(U.ana, `update public.alerts set description = '   ' where id = $1`, [id]);
+  igual((await comoSistema(`select description from public.alerts where id = $1`, [id])).rows[0].description, null);
+});
+await prueba('evidencias: solo rutas de la misma alerta', async () => {
+  const id = await nuevaAlerta(U.ana);
+  await como(U.ana, `update public.alerts set media_urls = array['alertas/' || $1 || '/foto-1.jpg'] where id = $1::uuid`, [id]);
+  await debeFallar(como(U.ana, `update public.alerts set media_urls = array['https://atacante.example/x.png'] where id = $1`, [id]), '22023');
+  await debeFallar(como(U.ana, `update public.alerts set media_urls = array['alertas/00000000-0000-0000-0000-000000000000/x.jpg'] where id = $1`, [id]), '22023');
+});
+await prueba('el autor no puede quitar la marca de alerta falsa', async () => {
+  const id = await nuevaAlerta(U.ana);
+  await como(U.oper, `select public.marcar_alerta_falsa($1, 'prueba')`, [id]);
+  await comoSistema(`update public.alerts set status = 'open' where id = $1`, [id]);
+  await como(U.ana, `update public.alerts set marcada_falsa = false where id = $1`, [id]);
+  igual((await comoSistema(`select marcada_falsa from public.alerts where id = $1`, [id])).rows[0].marcada_falsa, true);
+  await comoSistema(`update public.profiles set bloqueado_hasta = null, reportes_falsos = 0 where id = $1`, [U.ana]);
+  await comoSistema(`update public.alerts set marcada_falsa = false where user_id = $1`, [U.ana]);
+});
+await prueba('autorización de datos: solo por la función, con fecha del servidor y auditoría', async () => {
+  await como(U.beto, `update public.profiles set consentimiento_version = '2099-01-01', consentimiento_fecha = now() where id = $1`, [U.beto]);
+  igual((await comoSistema(`select consentimiento_version v from public.profiles where id = $1`, [U.beto])).rows[0].v, null);
+  await como(U.beto, `select public.aceptar_politica('2026-10-08')`);
+  const p = (await comoSistema(`select consentimiento_version v, consentimiento_fecha is not null f from public.profiles where id = $1`, [U.beto])).rows[0];
+  igual(p.v, '2026-10-08'); igual(p.f, true);
+  igual((await comoSistema(`select count(*)::int n from public.auditoria where accion = 'acepta_politica' and usuario_id = $1`, [U.beto])).rows[0].n, 1);
+  await debeFallar(como(U.beto, `select public.aceptar_politica('x')`), '22023');
+  await debeFallar(como('anon', `select public.aceptar_politica('2026-10-08')`), '42501');
+});
+await prueba('habeas data: plazo legal, privacidad entre titulares y respuesta del admin', async () => {
+  const r = (await como(U.beto, `select * from public.crear_solicitud_titular('consulta', 'Quiero saber qué datos tienen de mí')`)).rows[0];
+  const dias = (await comoSistema(`select count(*)::int n from generate_series(current_date + 1, $1::date, '1 day') d where extract(isodow from d) < 6`, [r.fecha_limite])).rows[0].n;
+  igual(dias, 10);
+  const rec = (await como(U.beto, `select * from public.crear_solicitud_titular('supresion', 'Eliminen mi cuenta por favor')`)).rows[0];
+  const diasRec = (await comoSistema(`select count(*)::int n from generate_series(current_date + 1, $1::date, '1 day') d where extract(isodow from d) < 6`, [rec.fecha_limite])).rows[0].n;
+  igual(diasRec, 15);
+  igual((await como(U.ana, `select * from public.solicitudes_titular`)).rows.length, 0);
+  await debeFallar(como(U.beto, `insert into public.solicitudes_titular (user_id, tipo, mensaje, fecha_limite) values ($1, 'queja', 'xxxxxxxxxxxx', current_date)`, [U.beto]));
+  await debeFallar(como(U.beto, `select public.crear_solicitud_titular('consulta', 'corto')`), '22023');
+  await debeFallar(como(U.oper, `select public.admin_responder_solicitud($1, 'respondida', 'Respuesta de prueba')`, [r.id]), '42501');
+  await como(U.admin, `select public.admin_responder_solicitud($1, 'respondida', 'Tenemos su nombre, cédula y alertas.')`, [r.id]);
+  igual((await como(U.beto, `select estado from public.solicitudes_titular where id = $1`, [r.id])).rows[0].estado, 'respondida');
+});
+await prueba('supresión: solo admin, solo ciudadanos, borra todo y conserva la constancia', async () => {
+  const T = '00000000-0000-0000-0000-0000000000f9';
+  await comoSistema(`insert into auth.users (id, email, raw_user_meta_data) values ($1, 'titular@test', '{"nombres":"Tita","apellidos":"Titular","cedula":"52000777","fecha_expedicion":"2010-01-01"}')`, [T]);
+  const alerta = await nuevaAlerta(T);
+  await como(T, `update public.alerts set media_urls = array['alertas/' || $1 || '/f.jpg'] where id = $1::uuid`, [alerta]);
+  await como(T, `insert into public.emergency_contacts (user_id, name, phone) values ($1, 'Mamá', '3001234567')`, [T]);
+  const sol = (await como(T, `select * from public.crear_solicitud_titular('supresion', 'Eliminen todos mis datos')`)).rows[0];
+  igual((await como(U.admin, `select * from public.admin_evidencias_titular($1)`, [T])).rows[0].ruta, `alertas/${alerta}/f.jpg`);
+  igual((await como(U.oper, `select * from public.admin_evidencias_titular($1)`, [T])).rows.length, 0);
+  await debeFallar(como(U.oper, `select public.admin_suprimir_titular($1, $2, 'Solicitud atendida')`, [T, sol.id]), '42501');
+  await debeFallar(como(U.admin, `select public.admin_suprimir_titular($1, null, 'Solicitud atendida')`, [U.oper]), '42501');
+  await como(U.admin, `select public.admin_suprimir_titular($1, $2, 'Datos suprimidos el día de hoy')`, [T, sol.id]);
+  const quedan = (await comoSistema(`select
+    (select count(*) from auth.users where id = $1)::int u, (select count(*) from public.profiles where id = $1)::int p,
+    (select count(*) from public.cedulas where user_id = $1)::int c, (select count(*) from public.alerts where user_id = $1)::int a,
+    (select count(*) from public.emergency_contacts where user_id = $1)::int e`, [T])).rows[0];
+  igual(JSON.stringify(quedan), JSON.stringify({ u: 0, p: 0, c: 0, a: 0, e: 0 }));
+  const s = (await comoSistema(`select user_id, estado from public.solicitudes_titular where id = $1`, [sol.id])).rows[0];
+  igual(s.user_id, null); igual(s.estado, 'cerrada');
+  // la cédula queda libre para un registro nuevo
+  await comoSistema(`insert into auth.users (id, email, raw_user_meta_data) values ('00000000-0000-0000-0000-0000000000fa', 'nuevo@test', '{"nombres":"N","apellidos":"N","cedula":"52000777","fecha_expedicion":"2010-01-01"}')`);
+});
+await prueba('ya no se pueden subir fotos de cédula', async () => {
+  await comoSistema(`insert into storage.buckets (id, name) values ('documentos-identidad', 'documentos-identidad') on conflict do nothing`);
+  await debeFallar(como(U.ana, `insert into storage.objects (bucket_id, name) values ('documentos-identidad', $1 || '/frente.jpg')`, [U.ana]));
 });
 
 await prueba('las migraciones se pueden volver a ejecutar (idempotentes)', async () => {

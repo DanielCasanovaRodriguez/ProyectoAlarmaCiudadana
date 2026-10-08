@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Shield } from 'lucide-react';
 import { Button } from '../ui/button';
+import { LegalDialog, EnlaceLegal, type TipoDocumentoLegal } from '../legal/LegalDocument';
+import { LINEA_EMERGENCIAS } from '../../config/colombia';
 
 interface AuthWelcomeScreenProps {
   onNavigateToLogin: () => void;
@@ -13,6 +15,7 @@ export function AuthWelcomeScreen({
   onNavigateToRegister, 
   onNavigateToCollaboratorLogin
 }: AuthWelcomeScreenProps) {
+  const [docLegal, setDocLegal] = useState<TipoDocumentoLegal | null>(null);
   return (
     <div className="h-full bg-gradient-to-br from-blue-600 via-blue-700 to-blue-800 flex flex-col items-center justify-between text-white p-6 overflow-y-auto">
       {/* Spacer top */}
@@ -92,13 +95,18 @@ export function AuthWelcomeScreen({
 
       {/* Footer - at bottom */}
       <div className="flex-shrink-0 text-center pt-6 pb-2" style={{ fontSize: '12px' }}>
-        <p className="text-blue-200">
-          Al continuar, aceptas nuestros Términos y Condiciones
+        <p className="text-blue-100">
+          ¿Emergencia con riesgo para la vida? Llama primero al{' '}
+          <a href={`tel:${LINEA_EMERGENCIAS}`} className="font-bold text-white underline">{LINEA_EMERGENCIAS}</a>
         </p>
-        <p className="text-blue-200 mt-1">
-          y la Política de Privacidad
+        <p className="text-blue-200 mt-2">
+          Consulta los{' '}
+          <EnlaceLegal tipo="terminos" onAbrir={setDocLegal} className="underline text-white">Términos y Condiciones</EnlaceLegal>
+          {' '}y la{' '}
+          <EnlaceLegal tipo="privacidad" onAbrir={setDocLegal} className="underline text-white">Política de Tratamiento de Datos</EnlaceLegal>
         </p>
       </div>
+      <LegalDialog tipo={docLegal} onClose={() => setDocLegal(null)} />
     </div>
   );
 }

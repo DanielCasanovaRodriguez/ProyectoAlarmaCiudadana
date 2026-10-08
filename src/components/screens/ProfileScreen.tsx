@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Bell, Shield, Info, LogOut, Phone, Loader2, CheckCircle, ChevronRight, IdCard, AlertTriangle, Clock } from 'lucide-react';
+import { ArrowLeft, Bell, Shield, Info, LogOut, Phone, Loader2, CheckCircle, ChevronRight, IdCard, AlertTriangle, Clock, Scale, FileText } from 'lucide-react';
 import { Input }   from '../ui/input';
 import { Switch }  from '../ui/switch';
 import { getUserProfile, updateUserProfile } from '../../services/profileService';
@@ -24,6 +24,8 @@ interface ProfileScreenProps {
   onNavigateToEmergencyContact: () => void;
   onNavigateToAbout:            () => void;
   onNavigateToPrivacy:          () => void;
+  onNavigateToTerms?:           () => void;
+  onNavigateToDerechos?:        () => void;
   onLogout?:                    () => void;
   /** Verificación de identidad (undefined = cargando). */
   identidad?:                   MiIdentidad | null;
@@ -37,6 +39,8 @@ export function ProfileScreen({
   onNavigateToEmergencyContact,
   onNavigateToAbout,
   onNavigateToPrivacy,
+  onNavigateToTerms,
+  onNavigateToDerechos,
   onLogout,
   identidad,
   onVerificarIdentidad,
@@ -258,8 +262,10 @@ export function ProfileScreen({
           {[
             { label: 'Contactos de Emergencia',   icon: Phone,  color: 'bg-red-100 text-red-600',       action: onNavigateToEmergencyContact },
             { label: 'Acerca de AlertaCiudadana', icon: Info,   color: 'bg-purple-100 text-purple-600', action: onNavigateToAbout },
-            { label: 'Política de Privacidad',    icon: Shield, color: 'bg-blue-100 text-blue-600',     action: onNavigateToPrivacy },
-          ].map((item, i, arr) => (
+            { label: 'Mis datos y derechos',      icon: Scale,    color: 'bg-emerald-100 text-emerald-700', action: onNavigateToDerechos },
+            { label: 'Política de Tratamiento de Datos', icon: Shield, color: 'bg-blue-100 text-blue-600', action: onNavigateToPrivacy },
+            { label: 'Términos y Condiciones',    icon: FileText, color: 'bg-gray-100 text-gray-600',     action: onNavigateToTerms },
+          ].filter(item => item.action).map((item, i, arr) => (
             <button
               key={item.label}
               onClick={item.action}

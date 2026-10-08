@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { AdminCedulasScreen } from './AdminCedulasScreen';
+import { AdminSolicitudesScreen } from './AdminSolicitudesScreen';
 import { AdminSidebar }       from '../../admin/AdminSidebar';
 import { AdminHeader }        from '../../admin/AdminHeader';
 import { AdminProfileDialog } from '../../admin/AdminProfileDialog';
@@ -148,6 +149,7 @@ export function AdminPanel({ onLogout }: AdminPanelProps = {}) {
     health:   'Salud del Sistema',
     config:   'Configuración del Sistema',
     identidad: 'Cédulas registradas',
+    solicitudes: 'Solicitudes de titulares (habeas data)',
   };
 
   // ── Render de sección activa ────────────────────────────────────
@@ -161,6 +163,7 @@ export function AdminPanel({ onLogout }: AdminPanelProps = {}) {
       case 'health':   return <AdminHealthScreen   accessToken={accessToken} />;
       case 'config':   return <AdminConfigScreen   accessToken={accessToken} />;
       case 'identidad': return <AdminCedulasScreen esAdmin={profile?.role === 'admin'} />;
+      case 'solicitudes': return <AdminSolicitudesScreen esAdmin={profile?.role === 'admin'} />;
       default:         return <AdminOverviewScreen accessToken={accessToken} />;
     }
   };

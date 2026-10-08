@@ -260,7 +260,7 @@ export function AdminSetupScreen({ onSetupComplete }: AdminSetupScreenProps) {
         </div>
 
         <p className="text-center text-white/70 text-xs mt-6">
-          AlertaCiudadana © 2025 • Conforme a la Ley 1581/2012
+          Alerta Ciudadana © {new Date().getFullYear()} • Ley 1581 de 2012
         </p>
       </div>
     </div>

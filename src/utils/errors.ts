@@ -68,6 +68,21 @@ const REGLAS: Array<{ test: (m: string, code: string, status?: number) => boolea
   // Registro: la BD rechazó la cédula (ya registrada) dentro de la creación del usuario
   { test: (m, c) => /cedula_no_disponible|database error saving new user/i.test(m) || (c === 'unexpected_failure' && /saving new user/i.test(m)),
     kind: 'duplicate', msg: 'No fue posible completar el registro con esa cédula. Si ya tienes una cuenta, inicia sesión con tu cédula; si crees que alguien la está usando, contáctanos.' },
+  // Validaciones del servidor (paso 10)
+  { test: (m) => /fuera_de_colombia/.test(m), kind: 'validation',
+    msg: 'Alerta Ciudadana solo recibe reportes ubicados en Colombia. Si estás en el exterior, comunícate con las autoridades locales.' },
+  { test: (m) => /ubicacion_invalida/.test(m), kind: 'validation',
+    msg: 'No pudimos leer tu ubicación. Activa el GPS e intenta de nuevo.' },
+  { test: (m) => /descripcion_larga/.test(m), kind: 'validation',
+    msg: 'La descripción admite máximo 1000 caracteres.' },
+  { test: (m) => /evidencia_invalida|demasiadas_evidencias/.test(m), kind: 'validation',
+    msg: 'No se pudieron adjuntar esas evidencias (máximo 10 archivos subidos desde la app).' },
+  { test: (m) => /demasiadas_solicitudes/.test(m), kind: 'validation',
+    msg: 'Ya tienes 5 solicitudes en trámite. Espera la respuesta antes de enviar otra.' },
+  { test: (m) => /mensaje_invalido/.test(m), kind: 'validation',
+    msg: 'Describe tu solicitud (entre 10 y 2000 caracteres).' },
+  { test: (m) => /respuesta_requerida/.test(m), kind: 'validation',
+    msg: 'Escribe la respuesta que recibirá el titular (mínimo 10 caracteres).' },
   // Autenticación (Supabase Auth)
   { test: (m, c) => c === 'invalid_credentials' || /invalid login credentials/i.test(m),
     kind: 'auth', msg: 'Credenciales inválidas: el correo o la contraseña no son correctos.' },

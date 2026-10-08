@@ -201,13 +201,15 @@ export function AlarmSheet({ isOpen, onClose, onCreateAlert, bloqueo }: AlarmShe
                 </label>
                 <Textarea
                   id="description"
-                  placeholder="Describe brevemente la situación..."
+                  placeholder="Qué pasa y dónde (sin nombres ni datos personales)"
                   value={description}
-                  onChange={e => setDescription(e.target.value)}
+                  onChange={e => setDescription(e.target.value.slice(0, 1000))}
+                  maxLength={1000}
                   rows={3}
                   disabled={isSubmitting}
                   className="resize-none"
                 />
+                <p className="text-xs text-gray-400 text-right">{description.length}/1000 · la verán las personas cercanas</p>
               </div>
             )}
 
@@ -231,8 +233,8 @@ export function AlarmSheet({ isOpen, onClose, onCreateAlert, bloqueo }: AlarmShe
               <div className="flex gap-2">
                 <AlertTriangle className="w-4 h-4 text-yellow-600 flex-shrink-0 mt-0.5" />
                 <p className="text-xs text-yellow-800">
-                  <strong>Importante:</strong> Solo reporta emergencias reales.
-                  El mal uso puede tener consecuencias legales.
+                  <strong>Importante:</strong> reporta solo emergencias reales. Las alertas falsas suspenden tu cuenta
+                  para reportar, y el uso indebido de la Línea 123 se sanciona con multa (Ley 1801 de 2016, art. 35 num. 7).
                 </p>
               </div>
             </div>

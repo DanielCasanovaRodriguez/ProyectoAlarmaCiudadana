@@ -4,6 +4,7 @@ import { Button } from '../ui/button';
 import { AuthInput } from '../auth/AuthInput';
 import { sendPasswordResetOTP } from '../../services/authService';
 import { toast } from 'sonner';
+import { validarNumeroCedula, soloDigitosCedula } from '../../utils/cedula';
 import { checkRateLimit, clearRateLimit } from '../../utils/rateLimitManager';
 
 interface ForgotPasswordScreenProps {
@@ -80,15 +81,21 @@ export function ForgotPasswordScreen({ onBack, onCodeSent }: ForgotPasswordScree
   const handleSubmit = async () => {
     setError('');
     
-    if (!email) {
-      setError('Ingresa tu correo electrónico');
+    const valor = email.trim();
+    if (!valor) {
+      setError('Ingresa tu número de cédula o tu correo');
       return;
     }
-    
-    if (!isEmailValid(email)) {
+    const conCorreo = valor.includes('@');
+    if (conCorreo && !isEmailValid(valor)) {
       setError('Ingresa un correo válido');
       return;
     }
+    if (!conCorreo) {
+      const errCedula = /[a-z]/i.test(valor) ? 'Escribe tu número de cédula (solo números) o tu correo completo.' : validarNumeroCedula(valor);
+      if (errCedula) { setError(errCedula); return; }
+    }
+    const identificador = conCorreo ? valor.toLowerCase() : soloDigitosCedula(valor);
     
     if (cooldownRemaining > 0) {
       setError(`Por favor espera ${cooldownRemaining} segundos antes de intentar de nuevo`);
@@ -103,19 +110,17 @@ export function ForgotPasswordScreen({ onBack, onCodeSent }: ForgotPasswordScree
     setIsLoading(true);
     
     try {
-      console.log('📧 Enviando código de recuperación a:', email);
-      
-      const result = await sendPasswordResetOTP(email);
+      const result = await sendPasswordResetOTP(identificador);
       
       if (result.success) {
-        console.log('✅ Código enviado exitosamente');
-        
-        toast.success('Código enviado', {
-          description: 'Revisa tu correo electrónico (incluye carpeta de spam)'
+        toast.success(conCorreo ? 'Código enviado' : 'Solicitud recibida', {
+          description: conCorreo
+            ? 'Revisa tu correo electrónico (incluye carpeta de spam)'
+            : 'Si la cédula está registrada, enviamos un código al correo de la cuenta.'
         });
         
         setCooldownRemaining(COOLDOWN_SECONDS);
-        onCodeSent(email);
+        onCodeSent(identificador);
       } else {
         console.error('❌ Error al enviar código:', result.error);
         
@@ -168,7 +173,7 @@ export function ForgotPasswordScreen({ onBack, onCodeSent }: ForgotPasswordScree
           <div className="text-center mb-8">
             <h2 className="text-gray-900 mb-2">¿Olvidaste tu contraseña?</h2>
             <p className="text-gray-600">
-              Ingresa tu correo electrónico y te enviaremos un código para restablecer tu contraseña
+              Ingresa tu número de cédula o tu correo y te enviaremos un código al correo de tu cuenta para restablecer tu contraseña
             </p>
           </div>
 
@@ -234,11 +239,10 @@ export function ForgotPasswordScreen({ onBack, onCodeSent }: ForgotPasswordScree
           {/* Form */}
           <div className="space-y-6">
             <AuthInput
-              type="email"
-              label="Correo electrónico"
+              label="Cédula o correo electrónico"
               value={email}
               onChange={setEmail}
-              placeholder="tu@email.com"
+              placeholder="1012345678 o tu@correo.com"
               error={error}
               required
               disabled={isRateLimited}

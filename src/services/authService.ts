@@ -217,6 +217,10 @@ export async function completeRegistration(_email: string) {
 // ================================================================
 export async function sendPasswordResetOTP(email: string) {
   try {
+    if (!esCorreo(email)) {
+      await recuperarConCedula(email);
+      return { success: true };
+    }
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/reset-password`,
     });
@@ -279,6 +283,10 @@ export async function updatePassword(password: string) {
 
 export async function verifyPasswordResetOTP(email: string, code: string) {
   try {
+    if (!esCorreo(email)) {
+      await verificarRecuperacionConCedula(email, code);
+      return { success: true, error: null };
+    }
     const { error } = await supabase.auth.verifyOtp({
       email,
       token: code,
@@ -307,7 +315,7 @@ export class AccesoCedulaError extends Error {
   }
 }
 
-async function llamarAccesoCedula(body: Record<string, string>) {
+async function invocarAccesoCedula(body: Record<string, string>): Promise<unknown> {
   const { data, error } = await supabase.functions.invoke('acceso-cedula', { body });
   if (error) {
     // Errores HTTP de la función: traen un mensaje ya preparado para el usuario
@@ -317,8 +325,13 @@ async function llamarAccesoCedula(body: Record<string, string>) {
       try { cuerpo = await ctx.json(); } catch { cuerpo = null; }
     }
     if (cuerpo?.error) throw new AccesoCedulaError(cuerpo.error, cuerpo.codigo, cuerpo.email_enmascarado);
-    throw toAppError(error, 'No se pudo iniciar sesión. Intenta de nuevo.');
+    throw toAppError(error, 'No se pudo completar la solicitud. Intenta de nuevo.');
   }
+  return data;
+}
+
+async function llamarAccesoCedula(body: Record<string, string>) {
+  const data = await invocarAccesoCedula(body);
   const s = data as { access_token?: string; refresh_token?: string };
   if (!s?.access_token || !s?.refresh_token) throw new Error('No se pudo iniciar sesión. Intenta de nuevo.');
   const { data: sesion, error: errSesion } = await supabase.auth.setSession({
@@ -335,3 +348,16 @@ export function iniciarSesionConCedula(cedula: string, password: string) {
 export function confirmarCorreoConCedula(cedula: string, codigo: string) {
   return llamarAccesoCedula({ accion: 'confirmar', cedula, codigo });
 }
+
+/** Recuperación de contraseña con cédula: el código llega al correo de la cuenta. */
+export async function recuperarConCedula(cedula: string): Promise<string> {
+  const r = await invocarAccesoCedula({ accion: 'recuperar', cedula }) as { mensaje?: string };
+  return r?.mensaje ?? 'Si la cédula está registrada, enviamos un código al correo de la cuenta.';
+}
+
+export function verificarRecuperacionConCedula(cedula: string, codigo: string) {
+  return llamarAccesoCedula({ accion: 'verificar_recuperacion', cedula, codigo });
+}
+
+/** ¿El identificador escrito es un correo (si no, se trata como cédula)? */
+export const esCorreo = (identificador: string) => identificador.includes('@');

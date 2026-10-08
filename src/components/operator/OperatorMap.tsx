@@ -1,4 +1,5 @@
 import L from 'leaflet';
+import { escapeHtml } from '../../utils/html';
 import React, { useEffect, useRef } from 'react';
 import type { Incident } from './types';
 import { STATUS_LABELS, SEVERITY_COLORS } from './types';
@@ -52,7 +53,7 @@ function buildPopupHtml(incident: Incident): string {
   return `
     <div style="padding:8px 4px; min-width:180px; font-family:sans-serif;">
       <p style="font-weight:700; font-size:13px; color:#111; margin:0 0 4px;">
-        ${incident.typeLabel}
+        ${escapeHtml(incident.typeLabel)}
       </p>
       <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
         <span style="
@@ -60,13 +61,13 @@ function buildPopupHtml(incident: Incident): string {
           color:${SEVERITY_COLORS[incident.severity]};
           border:1px solid ${SEVERITY_COLORS[incident.severity]}66;
           border-radius:4px; padding:1px 6px; font-size:11px; font-weight:600;
-        ">${incident.severity}</span>
-        <span style="font-size:11px; color:#555;">${statusLabel}</span>
+        ">${escapeHtml(incident.severity)}</span>
+        <span style="font-size:11px; color:#555;">${escapeHtml(statusLabel)}</span>
       </div>
-      <p style="font-size:11px; color:#888; margin:0 0 2px;">${incident.time}</p>
-      <p style="font-size:11px; color:#888; margin:0 0 6px;">${incident.source}</p>
+      <p style="font-size:11px; color:#888; margin:0 0 2px;">${escapeHtml(incident.time)}</p>
+      <p style="font-size:11px; color:#888; margin:0 0 6px;">${escapeHtml(incident.source)}</p>
       ${incident.description && incident.description !== 'Sin descripción'
-        ? `<p style="font-size:11px; color:#444; margin:0 0 6px; max-width:200px; word-break:break-word;">${incident.description}</p>`
+        ? `<p style="font-size:11px; color:#444; margin:0 0 6px; max-width:200px; word-break:break-word;">${escapeHtml(incident.description)}</p>`
         : ''}
       <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer"
          style="font-size:11px; color:#2563eb; text-decoration:none;">
