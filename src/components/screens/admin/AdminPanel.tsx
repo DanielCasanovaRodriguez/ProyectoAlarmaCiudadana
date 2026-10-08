@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { AdminVerificationsScreen } from './AdminVerificationsScreen';
+import { AdminCedulasScreen } from './AdminCedulasScreen';
 import { AdminSidebar }       from '../../admin/AdminSidebar';
 import { AdminHeader }        from '../../admin/AdminHeader';
 import { AdminProfileDialog } from '../../admin/AdminProfileDialog';
@@ -147,7 +147,7 @@ export function AdminPanel({ onLogout }: AdminPanelProps = {}) {
     reports:  'Reportes y Análisis',
     health:   'Salud del Sistema',
     config:   'Configuración del Sistema',
-    identidad: 'Verificación de identidad',
+    identidad: 'Cédulas registradas',
   };
 
   // ── Render de sección activa ────────────────────────────────────
@@ -160,7 +160,7 @@ export function AdminPanel({ onLogout }: AdminPanelProps = {}) {
       case 'reports':  return <AdminReportsScreen  accessToken={accessToken} />;
       case 'health':   return <AdminHealthScreen   accessToken={accessToken} />;
       case 'config':   return <AdminConfigScreen   accessToken={accessToken} />;
-      case 'identidad': return <AdminVerificationsScreen puedeRevisar={profile?.role === 'admin'} />;
+      case 'identidad': return <AdminCedulasScreen esAdmin={profile?.role === 'admin'} />;
       default:         return <AdminOverviewScreen accessToken={accessToken} />;
     }
   };

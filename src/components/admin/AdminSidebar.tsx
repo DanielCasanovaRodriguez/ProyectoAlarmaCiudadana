@@ -37,7 +37,7 @@ export function AdminSidebar({ currentSection, onSectionChange, userRole }: Admi
     },
     {
       id: 'identidad',
-      label: 'Verificación de identidad',
+      label: 'Cédulas registradas',
       icon: IdCard,
       roles: ['admin', 'auditor']
     },

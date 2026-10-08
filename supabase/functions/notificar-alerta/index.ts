@@ -115,7 +115,19 @@ async function enviarAvisos(avisos: Aviso[]) {
           token,
           notification: { title: aviso.titulo, body: aviso.mensaje },
           data: aviso.data,
-          android: { priority: 'HIGH', notification: { channel_id: 'alertas', default_sound: true } },
+          android: {
+            priority: 'HIGH',          // despierta el teléfono aunque esté bloqueado o en reposo
+            ttl: '3600s',
+            notification: {
+              channel_id: 'alertas',
+              icon: 'ic_stat_alerta',
+              color: '#2563EB',
+              default_sound: true,
+              default_vibrate_timings: true,
+              notification_priority: 'PRIORITY_MAX',
+              visibility: 'PUBLIC',    // visible en la pantalla de bloqueo
+            },
+          },
         },
       }),
     });

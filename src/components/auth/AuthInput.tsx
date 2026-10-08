@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 
 interface AuthInputProps {
-  type?:        'text' | 'email' | 'password';
+  type?:        'text' | 'email' | 'password' | 'date';
   label:        string;
   value:        string;
   onChange:     (value: string) => void;
@@ -15,6 +15,8 @@ interface AuthInputProps {
   autoComplete?: string;
   maxLength?:   number;
   hint?:        string;
+  min?:         string;
+  max?:         string;
 }
 
 export function AuthInput({
@@ -31,6 +33,8 @@ export function AuthInput({
   autoComplete,
   maxLength,
   hint,
+  min,
+  max,
 }: AuthInputProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [isFocused,    setIsFocused]    = useState(false);
@@ -62,6 +66,8 @@ export function AuthInput({
           inputMode={inputMode}
           autoComplete={autoComplete}
           maxLength={maxLength}
+          min={min}
+          max={max}
           aria-invalid={!!error}
           value={value}
           onChange={e => onChange(e.target.value)}

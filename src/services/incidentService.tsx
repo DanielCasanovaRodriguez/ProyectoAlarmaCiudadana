@@ -239,3 +239,12 @@ export function getAvailableUnits(): Unit[] {
     { id: 'B-03', name: 'Bomberos 03',   type: 'Bomberos',   status: 'Disponible' },
   ];
 }
+
+// ================================================================
+// MARCAR COMO FALSA — reporte de broma: se cierra la alerta, cuenta para
+// su autor y 3 en 30 días suspenden sus reportes 7 días (lo decide la BD).
+// ================================================================
+export async function marcarAlertaFalsa(incidentId: string, nota?: string): Promise<{ error: string | null }> {
+  const { error } = await supabase.rpc('marcar_alerta_falsa', { p_alert_id: incidentId, p_nota: nota?.trim() || null });
+  return { error: error ? toUserMessage(error) : null };
+}

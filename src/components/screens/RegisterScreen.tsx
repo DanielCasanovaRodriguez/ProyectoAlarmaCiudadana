@@ -3,13 +3,15 @@ import { ArrowLeft, AlertCircle } from 'lucide-react';
 import { Button } from '../ui/button';
 import { AuthInput } from '../auth/AuthInput';
 import { AuthCheckbox } from '../auth/AuthCheckbox';
-import { validarNumeroCedula, validarNombrePersona, soloDigitosCedula } from '../../utils/cedula';
+import { validarNumeroCedula, validarNombrePersona, soloDigitosCedula, validarFechaExpedicion, hoyISO, FECHA_EXPEDICION_MINIMA } from '../../utils/cedula';
+import { Lock } from 'lucide-react';
 
-/** Datos del formulario de registro (se crean en Supabase al final, tras escanear la cédula). */
+/** Datos del formulario de registro. */
 export interface DatosRegistro {
   nombres:   string;
   apellidos: string;
-  cedula:    string;   // solo dígitos
+  cedula:    string;   // solo dígitos (será el usuario para ingresar)
+  fechaExpedicion: string; // AAAA-MM-DD
   email:     string;
   phone:     string;   // celular colombiano, 10 dígitos
   password:  string;
@@ -18,9 +20,9 @@ export interface DatosRegistro {
 interface RegisterScreenProps {
   onBack: () => void;
   onNavigateToLogin: () => void;
-  /** Datos válidos → siguiente paso (explicación y escaneo de la cédula). */
-  onContinuar: (datos: DatosRegistro) => void;
-  /** Para volver del escaneo sin perder lo escrito. */
+  /** Datos válidos → crear la cuenta (la BD valida y garantiza la cédula única). */
+  onContinuar: (datos: DatosRegistro) => Promise<void>;
+  /** Para no perder lo escrito si hay que corregir algo. */
   datosIniciales?: Partial<DatosRegistro> | null;
   /** Mensaje de error del paso de creación de la cuenta (p. ej. correo ya registrado). */
   errorInicial?: string | null;
@@ -41,6 +43,8 @@ export function RegisterScreen({ onBack, onNavigateToLogin, onContinuar, datosIn
   const [nombres,   setNombres]   = useState(datosIniciales?.nombres ?? '');
   const [apellidos, setApellidos] = useState(datosIniciales?.apellidos ?? '');
   const [cedula,    setCedula]    = useState(datosIniciales?.cedula ?? '');
+  const [fechaExp,  setFechaExp]  = useState(datosIniciales?.fechaExpedicion ?? '');
+  const [enviando,  setEnviando]  = useState(false);
   const [email,     setEmail]     = useState(datosIniciales?.email ?? '');
   const [phone,     setPhone]     = useState(datosIniciales?.phone ?? '');
   const [password,  setPassword]  = useState('');
@@ -49,15 +53,16 @@ export function RegisterScreen({ onBack, onNavigateToLogin, onContinuar, datosIn
   const [errors, setErrors] = useState<Errores>(errorInicial ? { general: errorInicial } : {});
 
   const canSubmit =
-    nombres.trim().length > 0 && apellidos.trim().length > 0 && cedula.trim().length > 0 &&
+    nombres.trim().length > 0 && apellidos.trim().length > 0 && cedula.trim().length > 0 && fechaExp.length > 0 &&
     email.length > 0 && phone.length > 0 && password.length > 0 && confirmPassword.length > 0 && termsAccepted;
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const e: Errores = {};
 
     const errN = validarNombrePersona(nombres, 'nombres');     if (errN) e.nombres = errN;
     const errA = validarNombrePersona(apellidos, 'apellidos'); if (errA) e.apellidos = errA;
     const errC = validarNumeroCedula(cedula);                  if (errC) e.cedula = errC;
+    const errF = validarFechaExpedicion(fechaExp);             if (errF) e.fechaExpedicion = errF;
 
     if (!email.trim()) e.email = 'Ingresa tu correo electrónico';
     else if (!EMAIL_RE.test(email.trim())) e.email = 'Ingresa un correo válido';
@@ -77,14 +82,22 @@ export function RegisterScreen({ onBack, onNavigateToLogin, onContinuar, datosIn
     setErrors(e);
     if (Object.keys(e).length > 0) return;
 
-    onContinuar({
-      nombres: nombres.trim().replace(/\s+/g, ' '),
-      apellidos: apellidos.trim().replace(/\s+/g, ' '),
-      cedula: soloDigitosCedula(cedula),
-      email: email.trim().toLowerCase(),
-      phone: cel!,
-      password,
-    });
+    setEnviando(true);
+    try {
+      await onContinuar({
+        nombres: nombres.trim().replace(/\s+/g, ' '),
+        apellidos: apellidos.trim().replace(/\s+/g, ' '),
+        cedula: soloDigitosCedula(cedula),
+        fechaExpedicion: fechaExp,
+        email: email.trim().toLowerCase(),
+        phone: cel!,
+        password,
+      });
+    } catch (err: any) {
+      setErrors({ general: err?.message || 'No se pudo crear la cuenta. Intenta de nuevo.' });
+    } finally {
+      setEnviando(false);
+    }
   };
 
   return (
@@ -102,7 +115,7 @@ export function RegisterScreen({ onBack, onNavigateToLogin, onContinuar, datosIn
         <div className="max-w-md mx-auto space-y-6">
           <div className="text-center mb-8">
             <h2 className="text-gray-900 mb-2">Únete a AlertaCiudadana</h2>
-            <p className="text-gray-600">Paso 1 de 2: tus datos. Luego verificaremos tu cédula.</p>
+            <p className="text-gray-600">Tu número de cédula será tu usuario para ingresar.</p>
           </div>
 
           {errors.general && (
@@ -122,6 +135,13 @@ export function RegisterScreen({ onBack, onNavigateToLogin, onContinuar, datosIn
             <AuthInput label="Número de cédula" value={cedula} onChange={setCedula} placeholder="1012345678"
               error={errors.cedula} required inputMode="numeric" maxLength={14} autoComplete="off"
               hint="Tal como aparece en tu cédula de ciudadanía, sin puntos." />
+            <AuthInput type="date" label="Fecha de expedición de la cédula" value={fechaExp} onChange={setFechaExp}
+              error={errors.fechaExpedicion} required min={FECHA_EXPEDICION_MINIMA} max={hoyISO()}
+              hint="Aparece en el reverso de tu cédula." />
+            <div className="flex items-start gap-2 text-xs text-gray-600 bg-gray-50 rounded-lg p-3">
+              <Lock className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" aria-hidden />
+              <span>Una cédula = una cuenta, para que las alertas sean confiables. Tu cédula se guarda cifrada y nadie más puede verla.</span>
+            </div>
             <AuthInput type="email" label="Correo electrónico" value={email} onChange={setEmail}
               placeholder="tu@email.com" error={errors.email} required autoComplete="email" />
             <AuthInput label="Celular" value={phone} onChange={setPhone} placeholder="3001234567"
@@ -137,7 +157,8 @@ export function RegisterScreen({ onBack, onNavigateToLogin, onContinuar, datosIn
               error={errors.terms}
               label={
                 <span>
-                  Acepto los <span className="text-blue-600">Términos y Condiciones</span> y la{' '}
+                  Acepto los <span className="text-blue-600">Términos y Condiciones</span> y autorizo el tratamiento de mis
+                  datos personales, incluida mi cédula, conforme a la Ley 1581 de 2012 y la{' '}
                   <span className="text-blue-600">Política de Privacidad</span>
                 </span>
               }
@@ -146,11 +167,11 @@ export function RegisterScreen({ onBack, onNavigateToLogin, onContinuar, datosIn
 
           <Button
             onClick={handleSubmit}
-            disabled={!canSubmit}
+            disabled={!canSubmit || enviando}
             className="w-full bg-blue-600 hover:bg-blue-700 text-white disabled:bg-gray-300 disabled:text-gray-500"
             size="lg"
           >
-            Siguiente
+            {enviando ? 'Creando tu cuenta…' : 'Crear cuenta'}
           </Button>
 
           <div className="text-center pt-4">

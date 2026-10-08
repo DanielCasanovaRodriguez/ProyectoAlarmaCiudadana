@@ -113,11 +113,10 @@ export function ProfileScreen({
     : '?';
 
   const tarjetaIdentidad = (() => {
-    if (identidad === undefined) return { icono: Loader2, color: 'bg-gray-100 text-gray-500', titulo: 'Consultando verificación…', texto: '', accion: false, girar: true };
-    if (identidad === null) return { icono: AlertTriangle, color: 'bg-amber-100 text-amber-700', titulo: 'Identidad sin verificar', texto: 'Verifica tu cédula para poder reportar alertas.', accion: true };
-    if (identidad.estado === 'verificada') return { icono: CheckCircle, color: 'bg-green-100 text-green-700', titulo: 'Identidad verificada', texto: `Cédula terminada en ${identidad.ultimos_digitos}`, accion: false };
-    if (identidad.estado === 'pendiente') return { icono: Clock, color: 'bg-blue-100 text-blue-700', titulo: 'Verificación en revisión', texto: `Cédula terminada en ${identidad.ultimos_digitos}. Ya puedes reportar alertas.`, accion: false };
-    return { icono: AlertTriangle, color: 'bg-red-100 text-red-700', titulo: 'Verificación rechazada', texto: identidad.motivo_rechazo ? `Motivo: ${identidad.motivo_rechazo}` : 'Envía nuevas fotos de tu cédula.', accion: true };
+    if (identidad === undefined) return { icono: Loader2, color: 'bg-gray-100 text-gray-500', titulo: 'Consultando tu cédula…', texto: '', accion: false, girar: true };
+    if (identidad === null) return { icono: AlertTriangle, color: 'bg-amber-100 text-amber-700', titulo: 'Cédula sin registrar', texto: 'Regístrala para poder reportar alertas e ingresar con ella.', accion: true };
+    if (!identidad.completa) return { icono: AlertTriangle, color: 'bg-amber-100 text-amber-700', titulo: 'Falta la fecha de expedición', texto: `Cédula terminada en ${identidad.ultimos_digitos}. Confírmala para poder reportar.`, accion: true };
+    return { icono: CheckCircle, color: 'bg-green-100 text-green-700', titulo: 'Cédula registrada', texto: `Terminada en ${identidad.ultimos_digitos} · es tu usuario para ingresar`, accion: false };
   })();
 
   return (
@@ -171,7 +170,7 @@ export function ProfileScreen({
               {tarjetaIdentidad.texto && <p className="text-xs text-gray-500 mt-0.5">{tarjetaIdentidad.texto}</p>}
             </div>
             {tarjetaIdentidad.accion && onVerificarIdentidad && (
-              <button onClick={onVerificarIdentidad} className="text-sm font-semibold text-blue-600 flex-shrink-0">Verificar</button>
+              <button onClick={onVerificarIdentidad} className="text-sm font-semibold text-blue-600 flex-shrink-0">Registrar</button>
             )}
           </div>
         </div>

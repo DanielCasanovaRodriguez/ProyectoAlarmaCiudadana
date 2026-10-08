@@ -19,6 +19,7 @@ import {
   getIncidentTimeline,
 } from '../../services/incidentService';
 import { useSignedMediaUrls } from '../../hooks/useSignedMediaUrls';
+import { marcarAlertaFalsa } from '../../services/incidentService';
 import { toast } from 'sonner';
 
 interface IncidentDetailDrawerProps {
@@ -115,6 +116,19 @@ export function IncidentDetailDrawer({
   };
 
   // ── Actualizar estado ─────────────────────────────────────────
+  const [confirmarFalsa, setConfirmarFalsa] = useState(false);
+
+  const handleMarcarFalsa = async () => {
+    if (updating) return;
+    setUpdating(true);
+    const { error } = await marcarAlertaFalsa(incident.id, note.trim() || 'Reporte falso');
+    setUpdating(false);
+    setConfirmarFalsa(false);
+    if (error) { toast.error('No se pudo marcar como falsa', { description: error }); return; }
+    toast.success('Alerta marcada como falsa', { description: 'Se cerró y quedó registrada en el historial del ciudadano.' });
+    onIncidentUpdate(incident.id, { status: 'resolved' });
+  };
+
   const handleUpdateStatus = async (newStatus: 'ack' | 'resolved') => {
     if (updating) return;
     setUpdating(true);
@@ -394,6 +408,31 @@ export function IncidentDetailDrawer({
                   Resolver caso
                 </Button>
               </div>
+
+              {/* Reporte de broma: requiere confirmación */}
+              {!confirmarFalsa ? (
+                <button
+                  type="button"
+                  onClick={() => setConfirmarFalsa(true)}
+                  disabled={updating}
+                  className="mt-3 w-full text-sm text-red-700 hover:underline"
+                >
+                  Marcar como alerta falsa
+                </button>
+              ) : (
+                <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 space-y-2" role="alert">
+                  <p className="text-xs text-red-800">
+                    Se cerrará la alerta y contará en el historial del ciudadano. Con 3 alertas falsas en 30 días
+                    sus reportes quedan suspendidos 7 días. Usa la nota para explicar el motivo.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" className="flex-1" onClick={() => setConfirmarFalsa(false)} disabled={updating}>Cancelar</Button>
+                    <Button size="sm" className="flex-1 bg-red-600 hover:bg-red-700 text-white" onClick={handleMarcarFalsa} disabled={updating}>
+                      {updating ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirmar: es falsa'}
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           </>
         )}

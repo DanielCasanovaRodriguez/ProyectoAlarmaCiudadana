@@ -18,7 +18,7 @@ interface MainMapScreenProps {
   onNavigateToHistory: () => void;
   onNavigateToProfile: () => void;
   onNavigateToTutorial:() => void;
-  bloqueoReporte?:      { mensaje: string; onVerificar: () => void } | null;
+  bloqueoReporte?:      { mensaje: string; onVerificar?: () => void } | null;
 }
 
 // ================================================================

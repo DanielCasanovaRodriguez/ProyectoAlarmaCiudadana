@@ -74,3 +74,17 @@ Las pruebas con inicio de sesión en el Supabase real necesitan credenciales, qu
 - [ ] Admin → *Verificación de identidad*: ver fotos y número, aprobar/rechazar (el rechazo exige motivo).
 - [ ] Modo avión: aviso “Sin conexión”, SOS deshabilitado con botón “Llamar al 123”; al volver la red, “Conexión restablecida”.
 - [ ] Dos celulares a < 1 km: reportar en uno → aviso en el otro (con la app abierta; con Firebase, también cerrada).
+
+## Versión 1.3.0 (2026-10-08): cédula por formulario, acceso con cédula, antiabuso y seguridad
+
+| Prueba | Resultado |
+|---|---|
+| `npm run test:db` (réplica de producción, migraciones 1–9) | ✅ 70/70 |
+| `npm run test:unit` (errores 20/20, validaciones de cédula y fecha 21/21) | ✅ |
+| Producción, transacción revertida: registro con cédula → guardada cifrada, eliminada de metadatos, perfil `citizen`; duplicado (con cero a la izquierda) rechazado | ✅ |
+| Producción, `acceso-cedula`: sin token 401; cédula inválida 400; inexistente 401 genérico; 6.º intento 429 (bloqueo 15 min); CORS no autoriza orígenes ajenos | ✅ |
+| Producción: BD → pg_net (ya en `extensions`) → notificar-alerta | ✅ 200 |
+| CSP de `vercel.json` servida localmente: la app carga, Supabase permitido, dominio ajeno bloqueado | ✅ |
+| APK 1.3.0 con R8 (3,7 MB) en emulador: arranca, plugins funcionan, selector de fecha nativo sin fechas futuras | ✅ |
+| Registro y acceso con una cédula y correo reales | ⏳ Responsable |
+| Push con la app cerrada | ⏳ Requiere Firebase |

@@ -485,6 +485,22 @@ export interface Database {
           es_propia: boolean; distancia_m: number | null;
         }[];
       };
+      mi_cedula: { Args: Record<string, never>; Returns: { ultimos_digitos: string; completa: boolean }[] };
+      mi_estado_reporte: {
+        Args: Record<string, never>;
+        Returns: { puede_reportar: boolean; bloqueado_hasta: string | null; reportes_falsos: number }[];
+      };
+      registrar_mi_cedula: { Args: { p_numero: string; p_fecha: string }; Returns: { ultimos_digitos: string }[] };
+      admin_listar_cedulas: {
+        Args: Record<string, never>;
+        Returns: {
+          user_id: string; nombres: string | null; apellidos: string | null; email: string | null;
+          ultimos_digitos: string; completa: boolean; estado_cuenta: string; reportes_falsos: number; created_at: string;
+        }[];
+      };
+      admin_ver_cedula: { Args: { p_user_id: string }; Returns: { numero: string; fecha_expedicion: string | null }[] };
+      admin_liberar_cedula: { Args: { p_user_id: string; p_motivo: string }; Returns: undefined };
+      marcar_alerta_falsa: { Args: { p_alert_id: string; p_nota?: string | null }; Returns: undefined };
       registrar_dispositivo: { Args: { p_token: string; p_plataforma?: string }; Returns: undefined };
       eliminar_dispositivo:  { Args: { p_token: string }; Returns: undefined };
       rol_actual:     { Args: Record<string, never>; Returns: string | null };

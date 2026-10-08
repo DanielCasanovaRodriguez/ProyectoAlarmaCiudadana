@@ -23,7 +23,7 @@ interface AlarmSheetProps {
   //   3. Actualizar media_urls en la alerta
   onCreateAlert: (type: Alert['type'], description: string, files: File[]) => Promise<void>;
   /** Si el usuario no puede reportar (identidad sin verificar o rechazada). */
-  bloqueo?: { mensaje: string; onVerificar: () => void } | null;
+  bloqueo?: { mensaje: string; onVerificar?: () => void } | null;
 }
 
 const alertTypes = [
@@ -242,9 +242,11 @@ export function AlarmSheet({ isOpen, onClose, onCreateAlert, bloqueo }: AlarmShe
           {bloqueo && (
             <div className="mx-6 mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 flex flex-col gap-2" role="alert">
               <p className="text-sm text-amber-900">{bloqueo.mensaje}</p>
-              <div className="grid grid-cols-2 gap-2">
-                <button type="button" onClick={bloqueo.onVerificar}
-                  className="rounded-lg bg-blue-600 text-white text-sm font-semibold py-2">Verificar ahora</button>
+              <div className={`grid gap-2 ${bloqueo.onVerificar ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                {bloqueo.onVerificar && (
+                  <button type="button" onClick={bloqueo.onVerificar}
+                    className="rounded-lg bg-blue-600 text-white text-sm font-semibold py-2">Registrar cédula</button>
+                )}
                 <a href="tel:123" className="inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 text-white text-sm font-semibold py-2">
                   <Phone className="w-4 h-4" aria-hidden /> Llamar al 123
                 </a>

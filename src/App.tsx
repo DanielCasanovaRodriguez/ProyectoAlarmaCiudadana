@@ -24,14 +24,12 @@ import { CollaboratorLoginScreen } from './components/screens/CollaboratorLoginS
 import { OperatorDashboard } from './components/screens/operator/OperatorDashboard';
 import { OperatorSettingsScreen } from './components/screens/operator/OperatorSettingsScreen';
 import { AdminPanel } from './components/screens/admin/AdminPanel';
-import { IdentityIntroScreen } from './components/screens/IdentityIntroScreen';
-import { IdentityScanScreen } from './components/screens/IdentityScanScreen';
-import { IdentitySubmitScreen } from './components/screens/IdentitySubmitScreen';
+import { IdentityFormScreen } from './components/screens/IdentityFormScreen';
 import { NearbyAlertScreen } from './components/screens/NearbyAlertScreen';
 import type { DatosRegistro } from './components/screens/RegisterScreen';
 import {
-  obtenerMiIdentidad, enviarVerificacion, identidadPermiteReportar,
-  type CapturaIdentidad, type MiIdentidad,
+  obtenerMiIdentidad, obtenerEstadoReporte, identidadPermiteReportar,
+  type MiIdentidad, type EstadoReporte,
 } from './services/identityService';
 import { reportarUbicacion, olvidarUbicacionEnviada, distanciaM, formatearDistancia } from './services/proximityService';
 import { getAlertTypeLabel } from './services/alertService';
@@ -92,9 +90,7 @@ export type Screen =
   | 'operator-dashboard'
   | 'operator-settings'
   | 'admin-panel'
-  | 'identity-intro'
-  | 'identity-scan'
-  | 'identity-submit'
+  | 'identity-form'
   | 'nearby-alert';
 
 export interface AppState {
@@ -121,9 +117,9 @@ export interface AppState {
   userLocation:        { lat: number; lng: number } | null;
   // Registro en dos pasos: datos del formulario y captura de la cédula
   pendingRegistration: DatosRegistro | null;
-  pendingIdentity:     CapturaIdentidad | null;
   registerError:       string | null;
-  identityMode:        'registro' | 'completar';
+  // Antiabuso: bloqueo temporal por reportes falsos
+  estadoReporte:       EstadoReporte | null;
   // Verificación de identidad del usuario (undefined = aún no consultada)
   identidad:           MiIdentidad | null | undefined;
   // Alerta cercana abierta desde una notificación
@@ -184,9 +180,8 @@ export default function App() {
     pendingVerification: null,
     userLocation:        null,
     pendingRegistration: null,
-    pendingIdentity:     null,
     registerError:       null,
-    identityMode:        'registro',
+    estadoReporte:       null,
     identidad:           undefined,
     nearbyAlertId:       null,
   });
@@ -502,8 +497,8 @@ export default function App() {
   // ── Verificación de identidad del ciudadano ─────────────────────
   const refrescarIdentidad = async () => {
     try {
-      const i = await obtenerMiIdentidad();
-      setAppState(prev => ({ ...prev, identidad: i }));
+      const [i, e] = await Promise.all([obtenerMiIdentidad(), obtenerEstadoReporte().catch(() => null)]);
+      setAppState(prev => ({ ...prev, identidad: i, estadoReporte: e }));
       return i;
     } catch {
       return undefined; // sin conexión: se consulta más tarde
@@ -521,15 +516,22 @@ export default function App() {
     if (appState.identidad === undefined) return;
     if (identidadPermiteReportar(appState.identidad)) return;
     ofrecidaVerificacion.current = true;
-    setAppState(prev => ({ ...prev, identityMode: 'completar', currentScreen: 'identity-intro' }));
+    setAppState(prev => ({ ...prev, currentScreen: 'identity-form' }));
   }, [appState.currentScreen, appState.identidad]);
 
-  const bloqueoReporte = appState.identidad !== undefined && !identidadPermiteReportar(appState.identidad)
+  const bloqueadoHasta = appState.estadoReporte?.bloqueado_hasta && new Date(appState.estadoReporte.bloqueado_hasta) > new Date()
+    ? new Date(appState.estadoReporte.bloqueado_hasta) : null;
+  const bloqueoReporte = bloqueadoHasta
     ? {
-        mensaje: appState.identidad?.estado === 'rechazada'
-          ? `La verificación de tu cédula fue rechazada${appState.identidad.motivo_rechazo ? ` (${appState.identidad.motivo_rechazo})` : ''}. Envíala de nuevo para poder reportar alertas.`
-          : 'Para reportar alertas necesitas verificar tu identidad con tu cédula. Solo toma un minuto.',
-        onVerificar: () => setAppState(prev => ({ ...prev, identityMode: 'completar', currentScreen: 'identity-intro' })),
+        mensaje: `Tus reportes están suspendidos hasta el ${bloqueadoHasta.toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })} porque varias de tus alertas fueron marcadas como falsas.`,
+        onVerificar: undefined,
+      }
+    : appState.identidad !== undefined && !identidadPermiteReportar(appState.identidad)
+    ? {
+        mensaje: appState.identidad
+          ? 'Confirma la fecha de expedición de tu cédula para poder reportar alertas.'
+          : 'Para reportar alertas necesitas registrar tu cédula. Solo toma un minuto.',
+        onVerificar: () => navigateToScreen('identity-form'),
       }
     : null;
 
@@ -553,7 +555,7 @@ export default function App() {
 
     // 0. Solo cuentas con verificación de identidad enviada (la BD también lo exige)
     if (appState.identidad !== undefined && !identidadPermiteReportar(appState.identidad)) {
-      throw new Error('Para reportar alertas necesitas verificar tu identidad con tu cédula.');
+      throw new Error('Para reportar alertas necesitas registrar tu cédula.');
     }
 
     // 1. Ubicación fresca del GPS en el momento del SOS. Si no se puede
@@ -706,7 +708,7 @@ export default function App() {
     updateAppState({
       identidad:           undefined,
       pendingRegistration: null,
-      pendingIdentity:     null,
+      estadoReporte:       null,
       nearbyAlertId:       null,
       auth:            { isLoggedIn: false, email: '', password: '', resetEmail: '' },
       user:            { name: '', hasLocationPermission: false, hasCompletedOnboarding: false },
@@ -784,91 +786,42 @@ export default function App() {
             onNavigateToLogin={() => navigateToScreen('login')}
             datosIniciales={appState.pendingRegistration}
             errorInicial={appState.registerError}
-            onContinuar={(datos) => {
+            onContinuar={async (datos) => {
+              // La BD valida la cédula y la fecha, garantiza que la cédula sea
+              // única (UNIQUE en la misma transacción) y la guarda cifrada.
+              const r = await signUp({
+                email: datos.email, password: datos.password,
+                nombres: datos.nombres, apellidos: datos.apellidos, phone: datos.phone,
+                cedula: datos.cedula, fechaExpedicion: datos.fechaExpedicion,
+              });
+              if (r.error) {
+                setAppState(prev => ({ ...prev, pendingRegistration: { ...datos, password: '' } }));
+                throw new Error(r.error);
+              }
               setAppState(prev => ({
                 ...prev,
-                pendingRegistration: datos,
+                pendingRegistration: null,
                 registerError: null,
-                identityMode: 'registro',
-                currentScreen: 'identity-intro',
+                pendingVerification: { email: datos.email, name: datos.nombres },
+                user: { ...prev.user, name: `${datos.nombres} ${datos.apellidos}` },
+                currentScreen: 'email-verification',
               }));
+              toast.success('Revisa tu correo', { description: 'Te enviamos un código para confirmar tu cuenta.' });
             }}
           />
         );
 
-      case 'identity-intro': {
-        const registro = appState.identityMode === 'registro';
-        if (registro && !appState.pendingRegistration) { navigateToScreen('register'); return null; }
+      case 'identity-form':
         return (
-          <IdentityIntroScreen
-            modo={appState.identityMode}
-            nombre={registro ? appState.pendingRegistration?.nombres : appState.user.name}
-            onContinuar={() => navigateToScreen('identity-scan')}
-            onVolver={() => navigateToScreen(registro ? 'register' : 'main-map')}
-            onAhoraNo={registro ? undefined : () => navigateToScreen('main-map')}
-          />
-        );
-      }
-
-      case 'identity-scan': {
-        const registro = appState.identityMode === 'registro';
-        const datos = appState.pendingRegistration;
-        if (registro && !datos) { navigateToScreen('register'); return null; }
-        const [nombresUsuario, ...resto] = (appState.user.name || '').split(' ');
-        return (
-          <IdentityScanScreen
-            modo={appState.identityMode}
-            registro={registro
-              ? { numero: datos!.cedula, nombres: datos!.nombres, apellidos: datos!.apellidos }
-              : { nombres: nombresUsuario ?? '', apellidos: resto.join(' ') }}
-            onVolver={() => navigateToScreen('identity-intro')}
-            onCorregirDatos={registro ? () => navigateToScreen('register') : undefined}
-            onEnviar={async (captura) => {
-              if (registro) {
-                // Se crea la cuenta al final del registro; las fotos se envían
-                // después de confirmar el correo (cuando ya hay sesión).
-                const r = await signUp({
-                  email: datos!.email, password: datos!.password,
-                  nombres: datos!.nombres, apellidos: datos!.apellidos, phone: datos!.phone,
-                });
-                if (r.error) {
-                  if (/ya existe una cuenta/i.test(r.error)) {
-                    setAppState(prev => ({ ...prev, registerError: r.error, currentScreen: 'register' }));
-                    return;
-                  }
-                  throw new Error(r.error);
-                }
-                setAppState(prev => ({
-                  ...prev,
-                  pendingIdentity: captura,
-                  pendingRegistration: prev.pendingRegistration ? { ...prev.pendingRegistration, password: '' } : null,
-                  pendingVerification: { email: datos!.email, name: datos!.nombres },
-                  user: { ...prev.user, name: `${datos!.nombres} ${datos!.apellidos}` },
-                  currentScreen: 'email-verification',
-                }));
-                toast.success('Revisa tu correo', { description: 'Te enviamos un código para confirmar tu cuenta.' });
-              } else {
-                const r = await enviarVerificacion(captura);
-                await refrescarIdentidad();
-                toast.success('Cédula enviada', { description: `Vinculamos la cédula terminada en ${r.ultimos_digitos} a tu cuenta.` });
-                navigateToScreen('main-map');
-              }
+          <IdentityFormScreen
+            nombre={appState.user.name}
+            actual={appState.identidad}
+            onListo={(ultimos) => {
+              toast.success('Cédula registrada', { description: `Terminada en ${ultimos}. Desde ahora es tu usuario para ingresar.` });
+              setAppState(prev => ({ ...prev, identidad: undefined, currentScreen: 'main-map' }));
             }}
-          />
-        );
-      }
-
-      case 'identity-submit':
-        if (!appState.pendingIdentity) { navigateToScreen('data-consent'); return null; }
-        return (
-          <IdentitySubmitScreen
-            captura={appState.pendingIdentity}
-            onListo={() => {
-              setAppState(prev => ({ ...prev, pendingIdentity: null, pendingRegistration: null, identidad: undefined, currentScreen: 'data-consent' }));
-            }}
-            onContinuarSinVerificar={() => {
-              setAppState(prev => ({ ...prev, pendingIdentity: null, pendingRegistration: null, identidad: undefined, currentScreen: 'data-consent' }));
-            }}
+            onVolver={() => navigateToScreen('main-map')}
+            onAhoraNo={() => navigateToScreen('main-map')}
           />
         );
 
@@ -896,15 +849,7 @@ export default function App() {
               const emailParaRegistro = appState.pendingVerification?.email ?? '';
               const result = await completeRegistration(emailParaRegistro);
               if (result.success) {
-                if (appState.pendingIdentity && session?.user) {
-                  const meta = session.user.user_metadata ?? {};
-                  setAppState(prev => ({
-                    ...prev,
-                    user: { ...prev.user, name: [meta.nombres, meta.apellidos].filter(Boolean).join(' ') || prev.user.name },
-                    auth: { ...prev.auth, email: session.user.email || prev.auth.email, password: '' },
-                    currentScreen: 'identity-submit',
-                  }));
-                } else if (session?.user) {
+                if (session?.user) {
                   const meta = session.user.user_metadata ?? {};
                   handleRegister([meta.nombres, meta.apellidos].filter(Boolean).join(' ') || meta.full_name || '', session.user.email || '', '');
                 } else {
@@ -1071,7 +1016,7 @@ export default function App() {
             onNavigateToPrivacy={() => navigateToScreen('privacy-policy')}
             onLogout={handleLogout}
             identidad={appState.identidad}
-            onVerificarIdentidad={() => setAppState(prev => ({ ...prev, identityMode: 'completar', currentScreen: 'identity-intro' }))}
+            onVerificarIdentidad={() => navigateToScreen('identity-form')}
           />
         );
 

@@ -31,7 +31,8 @@ create function auth.jwt() returns jsonb language sql stable as
   $$ select coalesce(nullif(current_setting('request.jwt.claims', true), ''), '{}')::jsonb $$;
 create function auth.uid() returns uuid language sql stable as
   $$ select nullif(auth.jwt() ->> 'sub', '')::uuid $$;
-create table auth.users (id uuid primary key, email text, raw_user_meta_data jsonb default '{}');
+create table auth.users (id uuid primary key, email text, raw_user_meta_data jsonb default '{}',
+  email_confirmed_at timestamptz default now(), created_at timestamptz default now());
 grant usage on schema auth to anon, authenticated;
 grant execute on all functions in schema auth to anon, authenticated;
 
@@ -222,9 +223,16 @@ async function debeFallar(p, codigo) {
   }
   throw new Error('se esperaba un error y la operación fue permitida');
 }
-const nuevaAlerta = async (uid, tipo = 'robbery', lat = 4.62) =>
-  (await como(uid, `insert into public.alerts (user_id, type_code, lat, lng) values ($1,$2,$3,-74.14) returning id`,
+const espaciar = async (uid) => {
+  // El límite de envío (desde el paso 8) exige espaciar las alertas: se
+  // retrasan las anteriores del usuario para que la prueba no lo active.
+  try { await comoSistema(`update public.alerts set created_at = created_at - interval '1 day' where user_id = $1 and created_at > now() - interval '1 day'`, [uid]); } catch { /* antes de migrar */ }
+};
+const nuevaAlerta = async (uid, tipo = 'robbery', lat = 4.62) => {
+  await espaciar(uid);
+  return (await como(uid, `insert into public.alerts (user_id, type_code, lat, lng) values ($1,$2,$3,-74.14) returning id`,
     [uid, tipo, lat])).rows[0].id;
+};
 
 // ------------------------------------------------------------------ montaje
 await db.exec(SUPABASE_STUB);
@@ -309,12 +317,8 @@ await prueba('un admin SÍ puede cambiar el rol de otro usuario', async () => {
   await como(U.admin, `update public.profiles set role = 'citizen' where id = $1`, [U.beto]);
 });
 
-// Desde el paso 5 los ciudadanos necesitan verificación de identidad enviada para reportar
-for (const f of ['f.jpg', 'r.jpg']) {
-  await como(U.ana, `insert into storage.objects (bucket_id, name) values ('documentos-identidad', $1)`, [`${U.ana}/${f}`]);
-}
-await como(U.ana, `select public.registrar_identidad($1,'amarilla','pdf417',true,true,null,$2,$3)`,
-  ['52000111', `${U.ana}/f.jpg`, `${U.ana}/r.jpg`]);
+// Desde el paso 8 los ciudadanos necesitan su cédula completa para reportar
+await como(U.ana, `select * from public.registrar_mi_cedula($1, $2)`, ['52000111', '2001-02-03']);
 
 console.log('\nAlertas');
 let alertaAna;
@@ -449,8 +453,8 @@ await prueba('los triggers siguen funcionando tras revocar EXECUTE (alta de usua
   igual(r.rows[0].role, 'citizen'); igual(r.rows[0].full_name, 'Nuevo');
 });
 
-// Ana ya no necesita su verificación de prueba
-await comoSistema(`delete from public.verificaciones_identidad where user_id = $1`, [U.ana]);
+// Ana ya no necesita su cédula de prueba
+await comoSistema(`delete from public.cedulas where user_id = $1`, [U.ana]);
 // ---- Paso 5: se inserta antes de "las migraciones se pueden volver a ejecutar"
 console.log('\nNombres y apellidos');
 await prueba('los perfiles existentes se dividieron en nombres y apellidos', async () => {
@@ -475,89 +479,9 @@ await prueba('un cliente antiguo que solo envía full_name sigue funcionando', a
   igual(r.rows[0].nombres, 'Ana'); igual(r.rows[0].apellidos, 'Pérez Gómez'); igual(r.rows[0].full_name, 'Ana Pérez Gómez');
 });
 
-console.log('\nVerificación de identidad (cédula)');
-const subirDoc = async (uid, nombre) => {
-  await como(uid, `insert into storage.objects (bucket_id, name) values ('documentos-identidad', $1)`, [`${uid}/${nombre}`]);
-  return `${uid}/${nombre}`;
-};
-const registrar = async (uid, numero, extra = {}) => {
-  const f = await subirDoc(uid, `frente-${Date.now()}-${Math.random()}.jpg`);
-  const r = await subirDoc(uid, `reverso-${Date.now()}-${Math.random()}.jpg`);
-  return como(uid, `select * from public.registrar_identidad($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [numero, extra.modelo ?? 'amarilla', extra.metodo ?? 'pdf417', true, true,
-     JSON.stringify({ nombres: 'X' }), extra.frente ?? f, extra.reverso ?? r]);
-};
-const CED_BETO = '1012345678';
-await prueba('un ciudadano sube fotos a su carpeta pero no a la ajena', async () => {
-  await subirDoc(U.beto, 'prueba.jpg');
-  await debeFallar(como(U.beto, `insert into storage.objects (bucket_id, name) values ('documentos-identidad', $1)`, [`${U.ana}/x.jpg`]));
-});
-await prueba('nadie (ni el dueño) puede volver a leer las fotos; solo admin', async () => {
-  igual((await como(U.beto, `select * from storage.objects where bucket_id = 'documentos-identidad'`)).rows.length, 0);
-  igual((await como(U.oper, `select * from storage.objects where bucket_id = 'documentos-identidad'`)).rows.length, 0);
-  igual((await como(U.admin, `select * from storage.objects where bucket_id = 'documentos-identidad'`)).rows.length >= 1, true);
-});
-await prueba('registrar la cédula deja estado pendiente y muestra solo los últimos 4 dígitos', async () => {
-  const r = await registrar(U.beto, '1.012.345.678');
-  igual(r.rows[0].estado, 'pendiente'); igual(r.rows[0].ultimos_digitos, '5678');
-});
-await prueba('el número NO se guarda en texto plano', async () => {
-  const r = await comoSistema(`select numero_hash, encode(numero_cifrado, 'escape') c from public.verificaciones_identidad where user_id = $1`, [U.beto]);
-  igual(r.rows[0].numero_hash.includes(CED_BETO), false); igual(r.rows[0].c.includes(CED_BETO), false);
-});
-await prueba('la misma cédula en otra cuenta es rechazada (una cédula = una cuenta)', async () => {
-  await debeFallar(registrar(U.ana, CED_BETO), '23505');
-  await debeFallar(registrar(U.ana, '001012345678'), '23505'); // ceros a la izquierda: misma cédula
-});
-await prueba('rechaza números inválidos y fotos que no existen o son ajenas', async () => {
-  await debeFallar(registrar(U.ana, '12ab'), '22023');
-  await debeFallar(registrar(U.ana, '98765432', { frente: `${U.ana}/no-existe.jpg` }), '22023');
-  await debeFallar(registrar(U.ana, '98765432', { frente: `${U.beto}/prueba.jpg` }), '22023');
-});
-await prueba('un ciudadano no puede escribir la tabla de verificaciones directamente', async () => {
-  await debeFallar(como(U.ana, `update public.verificaciones_identidad set estado = 'verificada'`));
-  await debeFallar(como(U.ana, `insert into public.verificaciones_identidad (user_id, numero_hash, numero_cifrado, ultimos_digitos, metodo_lectura, frente_path, reverso_path) values ($1,'h','\\x00','1','manual','a','b')`, [U.ana]));
-});
-await prueba('cada usuario solo ve su propia verificación', async () => {
-  igual((await como(U.ana, `select * from public.verificaciones_identidad`)).rows.length, 0);
-  igual((await como(U.beto, `select estado from public.mi_identidad()`)).rows[0].estado, 'pendiente');
-});
-await prueba('sin verificación no se puede reportar; con verificación enviada sí', async () => {
-  igual((await como(U.ana, `select public.puede_reportar() p`)).rows[0].p, false);
-  await debeFallar(nuevaAlerta(U.ana, 'fire'));
-  igual((await como(U.beto, `select public.puede_reportar() p`)).rows[0].p, true);
-  await nuevaAlerta(U.beto, 'fire');
-  igual((await como(U.oper, `select public.puede_reportar() p`)).rows[0].p, true); // personal: siempre
-});
-await prueba('solo el admin descifra el número; auditor y ciudadano no', async () => {
-  igual((await como(U.admin, `select numero from public.admin_detalle_identidad($1)`, [U.beto])).rows[0].numero, CED_BETO);
-  await debeFallar(como(U.audi, `select * from public.admin_detalle_identidad($1)`, [U.beto]), '42501');
-  await debeFallar(como(U.beto, `select * from public.admin_detalle_identidad($1)`, [U.beto]), '42501');
-});
-await prueba('admin y auditor listan verificaciones; el ciudadano no', async () => {
-  igual((await como(U.admin, `select * from public.admin_listar_identidades('pendiente')`)).rows.length >= 1, true);
-  igual((await como(U.audi, `select * from public.admin_listar_identidades()`)).rows.length >= 1, true);
-  await debeFallar(como(U.ana, `select * from public.admin_listar_identidades()`), '42501');
-});
-await prueba('revisión: el rechazo exige motivo, bloquea reportes y libera la cédula', async () => {
-  await debeFallar(como(U.admin, `select public.revisar_identidad($1, 'rechazada', '')`, [U.beto]), '22023');
-  await debeFallar(como(U.audi, `select public.revisar_identidad($1, 'verificada')`, [U.beto]), '42501');
-  await como(U.admin, `select public.revisar_identidad($1, 'rechazada', 'Foto ilegible')`, [U.beto]);
-  igual((await como(U.beto, `select public.puede_reportar() p`)).rows[0].p, false);
-  await registrar(U.ana, CED_BETO); // ya liberada
-  await comoSistema(`delete from public.verificaciones_identidad where user_id = $1`, [U.ana]);
-});
-await prueba('reenviar tras rechazo vuelve a pendiente; admin la aprueba', async () => {
-  const r = await registrar(U.beto, CED_BETO);
-  igual(r.rows[0].estado, 'pendiente');
-  await como(U.admin, `select public.revisar_identidad($1, 'verificada')`, [U.beto]);
-  igual((await como(U.beto, `select estado from public.mi_identidad()`)).rows[0].estado, 'verificada');
-  await debeFallar(registrar(U.beto, CED_BETO), '22023'); // ya verificada
-});
-await prueba('máximo 5 intentos de verificación', async () => {
-  await registrar(U.ana, '55555555');
-  for (let i = 0; i < 4; i++) await registrar(U.ana, '55555555');
-  await debeFallar(registrar(U.ana, '55555555'), '22023');
+console.log('\nEscaneo de cédula (retirado en el paso 8)');
+await prueba('la función de escaneo ya no se puede usar desde la app', async () => {
+  await debeFallar(como(U.beto, `select * from public.registrar_identidad('1012345678','amarilla','pdf417',true,true,null,'a','b')`), '42501');
 });
 
 console.log('\nAlertas cercanas (1 km)');
@@ -575,6 +499,8 @@ await prueba('cada usuario guarda su ubicación (redondeada) y nadie más la ve'
 });
 await prueba('usuarios_cercanos: incluye a quien está a <1 km, excluye a quien está lejos y al autor', async () => {
   await como(U.beto, `select public.actualizar_mi_ubicacion($1, $2)`, [K.lat, K.lng]);
+  await como(U.beto, `select * from public.registrar_mi_cedula($1, $2)`, ['1012345678', '2010-01-01']);
+  await espaciar(U.beto);
   alertaCercana = (await como(U.beto, `insert into public.alerts (user_id, type_code, lat, lng) values ($1,'robbery',$2,$3) returning id`, [U.beto, K.lat, K.lng])).rows[0].id;
   const r = await comoSistema(`select user_id, distancia_m from public.usuarios_cercanos($1)`, [alertaCercana]);
   const ids = r.rows.map(x => x.user_id);
@@ -602,6 +528,152 @@ await prueba('detalle público de la alerta: sin user_id, con distancia', async 
 await prueba('alertas resueltas de hace más de 48 h ya no se muestran', async () => {
   await comoSistema(`update public.alerts set status = 'resolved', created_at = now() - interval '3 days' where id = $1`, [alertaCercana]);
   igual((await como(U.audi, `select * from public.detalle_alerta_publica($1)`, [alertaCercana])).rows.length, 0);
+});
+
+console.log('\nRegistro con cédula (formulario) — unicidad real');
+const registrarAuth = async (id, cedula, fecha, extra = {}) =>
+  comoSistema(`insert into auth.users (id, email, raw_user_meta_data, email_confirmed_at, created_at) values ($1, $2, $3, $4, coalesce($5::timestamptz, now()))`,
+    [id, `${id}@test`, JSON.stringify({ nombres: 'Prueba', apellidos: 'Cédula', cedula, fecha_expedicion: fecha }),
+     extra.confirmado === false ? null : new Date().toISOString(), extra.creado ?? null]);
+const NUEVO1 = '00000000-0000-0000-0000-000000000101';
+const NUEVO2 = '00000000-0000-0000-0000-000000000102';
+const NUEVO3 = '00000000-0000-0000-0000-000000000103';
+await prueba('el registro guarda la cédula cifrada y la QUITA de los metadatos', async () => {
+  await registrarAuth(NUEVO1, '1.023.456.789', '2010-05-14');
+  const c = await comoSistema(`select ultimos_digitos, numero_hash, encode(numero_cifrado,'escape') n, fecha_expedicion_cifrada is not null f from public.cedulas where user_id = $1`, [NUEVO1]);
+  igual(c.rows[0].ultimos_digitos, '6789'); igual(c.rows[0].f, true);
+  igual(c.rows[0].numero_hash.includes('1023456789') || c.rows[0].n.includes('1023456789'), false, 'texto plano:');
+  const m = await comoSistema(`select raw_user_meta_data m from auth.users where id = $1`, [NUEVO1]);
+  igual('cedula' in m.rows[0].m || 'fecha_expedicion' in m.rows[0].m, false, 'metadatos con cédula:');
+});
+await prueba('misma cédula (con puntos o ceros) → el usuario NO se crea', async () => {
+  await debeFallar(registrarAuth(NUEVO2, '001023456789', '2011-01-01'), '23505');
+  igual((await comoSistema(`select count(*)::int n from auth.users where id = $1`, [NUEVO2])).rows[0].n, 0);
+});
+await prueba('fecha futura, fecha imposible o cédula inválida → rechazadas', async () => {
+  await debeFallar(registrarAuth(NUEVO2, '79111222', '2999-01-01'), '22023');
+  await debeFallar(registrarAuth(NUEVO2, '79111222', '2023-02-30'), '22023');
+  await debeFallar(registrarAuth(NUEVO2, '79111222', '1930-01-01'), '22023');
+  await debeFallar(registrarAuth(NUEVO2, '1234', '2010-01-01'), '22023');
+  await debeFallar(registrarAuth(NUEVO2, '1111111111', '2010-01-01'), '22023');
+});
+await prueba('una cédula reservada por una cuenta sin confirmar > 24 h se libera', async () => {
+  await registrarAuth(NUEVO2, '80555666', '2005-03-03', { confirmado: false, creado: new Date(Date.now() - 2 * 864e5).toISOString() });
+  await registrarAuth(NUEVO3, '80555666', '2005-03-03');
+  igual((await comoSistema(`select count(*)::int n from auth.users where id = $1`, [NUEVO2])).rows[0].n, 0, 'cuenta vieja sin confirmar:');
+  igual((await comoSistema(`select user_id from public.cedulas where user_id = $1`, [NUEVO3])).rows.length, 1);
+});
+await prueba('una cuenta CONFIRMADA nunca pierde su cédula', async () => {
+  await comoSistema(`update auth.users set created_at = now() - interval '30 days' where id = $1`, [NUEVO1]);
+  await debeFallar(registrarAuth(NUEVO2, '1023456789', '2010-05-14'), '23505');
+});
+await prueba('personal o cuentas sin cédula en metadatos se crean normalmente', async () => {
+  await comoSistema(`insert into auth.users (id, raw_user_meta_data) values ($1, '{"nombres":"Sin","apellidos":"Cedula"}')`, [NUEVO2]);
+  igual((await comoSistema(`select count(*)::int n from public.cedulas where user_id = $1`, [NUEVO2])).rows[0].n, 0);
+});
+
+console.log('\nCuentas existentes: registrar mi cédula');
+await prueba('una cuenta sin cédula la registra y ya puede reportar', async () => {
+  igual((await como(NUEVO2, `select public.puede_reportar() p`)).rows[0].p, false);
+  const r = await como(NUEVO2, `select * from public.registrar_mi_cedula($1, $2)`, ['52333444', '2008-08-08']);
+  igual(r.rows[0].ultimos_digitos, '3444');
+  igual((await como(NUEVO2, `select public.puede_reportar() p`)).rows[0].p, true);
+  igual((await como(NUEVO2, `select completa from public.mi_cedula()`)).rows[0].completa, true);
+});
+await prueba('cédula de otra persona → mensaje controlado (sin revelar de quién es)', async () => {
+  await debeFallar(como(U.oper, `select * from public.registrar_mi_cedula($1, $2)`, ['52333444', '2008-08-08']), '23505');
+});
+await prueba('no puede cambiar su cédula por otra; sí completar la fecha de una migrada', async () => {
+  await debeFallar(como(NUEVO2, `select * from public.registrar_mi_cedula($1, $2)`, ['99888777', '2008-08-08']), '22023');
+  await comoSistema(`update public.cedulas set fecha_expedicion_cifrada = null where user_id = $1`, [NUEVO2]);
+  igual((await como(NUEVO2, `select public.puede_reportar() p`)).rows[0].p, false, 'sin fecha:');
+  await como(NUEVO2, `select * from public.registrar_mi_cedula($1, $2)`, ['52.333.444', '2008-08-08']);
+  igual((await como(NUEVO2, `select public.puede_reportar() p`)).rows[0].p, true);
+});
+await prueba('cada usuario solo ve su propia cédula', async () => {
+  igual((await como(NUEVO2, `select * from public.cedulas`)).rows.length, 1);
+  igual((await como(U.oper, `select * from public.cedulas`)).rows.length, 0);
+  await debeFallar(como(NUEVO2, `insert into public.cedulas (user_id, numero_hash, numero_cifrado, ultimos_digitos) values ($1,'x','\\x00','1')`, [NUEVO2]));
+});
+
+console.log('\nAcceso con cédula (anti fuerza bruta)');
+await prueba('acceso_preparar encuentra la cuenta por cédula; la app NO puede llamarla', async () => {
+  const r = await comoSistema(`select * from public.acceso_preparar($1, '10.0.0.1')`, ['1.023.456.789']);
+  igual(r.rows[0].user_id, NUEVO1); igual(r.rows[0].bloqueado_segundos, 0);
+  await debeFallar(como(U.ana, `select * from public.acceso_preparar($1, 'x')`, ['1023456789']), '42501');
+});
+await prueba('cédula inexistente o inválida → sin cuenta, sin error', async () => {
+  igual((await comoSistema(`select user_id from public.acceso_preparar('77777777', '10.0.0.1')`)).rows[0].user_id, null);
+  igual((await comoSistema(`select user_id from public.acceso_preparar('abc', '10.0.0.1')`)).rows[0].user_id, null);
+});
+await prueba('5 contraseñas fallidas bloquean esa cédula 15 min; el éxito no se acepta durante el bloqueo', async () => {
+  for (let i = 0; i < 5; i++) await comoSistema(`select public.acceso_resultado($1, '10.0.0.2', false)`, ['1023456789']);
+  const r = await comoSistema(`select * from public.acceso_preparar($1, '10.0.0.3')`, ['1023456789']);
+  igual(r.rows[0].user_id, null); igual(r.rows[0].bloqueado_segundos > 800, true, `segundos ${r.rows[0].bloqueado_segundos}:`);
+  await comoSistema(`delete from private.intentos_acceso`);
+});
+await prueba('20 fallos desde una misma IP la bloquean (aunque cambie la cédula)', async () => {
+  for (let i = 0; i < 20; i++) await comoSistema(`select public.acceso_resultado($1, '10.9.9.9', false)`, [String(60000000 + i)]);
+  igual((await comoSistema(`select bloqueado_segundos b from public.acceso_preparar($1, '10.9.9.9')`, ['1023456789'])).rows[0].b > 0, true);
+  igual((await comoSistema(`select bloqueado_segundos b from public.acceso_preparar($1, '10.1.1.1')`, ['1023456789'])).rows[0].b, 0, 'otra IP:');
+  await comoSistema(`delete from private.intentos_acceso`);
+});
+await prueba('un ciudadano NO puede quitarse un bloqueo ni cambiar sus alertas falsas', async () => {
+  await comoSistema(`update public.profiles set bloqueado_hasta = now() + interval '1 day', reportes_falsos = 2 where id = $1`, [U.ana]);
+  await como(U.ana, `update public.profiles set bloqueado_hasta = null, reportes_falsos = 0 where id = $1`, [U.ana]);
+  const r = await comoSistema(`select bloqueado_hasta is not null b, reportes_falsos f from public.profiles where id = $1`, [U.ana]);
+  igual(r.rows[0].b, true); igual(r.rows[0].f, 2);
+  await comoSistema(`update public.profiles set bloqueado_hasta = null, reportes_falsos = 0 where id = $1`, [U.ana]);
+});
+await prueba('cuenta suspendida no puede acceder', async () => {
+  await comoSistema(`update public.profiles set status = 'suspended' where id = $1`, [NUEVO1]);
+  igual((await comoSistema(`select user_id from public.acceso_preparar($1, '10.0.0.1')`, ['1023456789'])).rows[0].user_id, null);
+  await comoSistema(`update public.profiles set status = 'active' where id = $1`, [NUEVO1]);
+});
+await prueba('los accesos quedan en la auditoría', async () => {
+  await comoSistema(`select public.acceso_resultado($1, '10.0.0.4', true, $2)`, ['1023456789', NUEVO1]);
+  igual((await comoSistema(`select count(*)::int n from public.auditoria where accion = 'acceso_cedula_fallido'`)).rows[0].n >= 25, true);
+  igual((await comoSistema(`select count(*)::int n from public.auditoria where accion = 'acceso_cedula' and usuario_id = $1`, [NUEVO1])).rows[0].n, 1);
+});
+
+console.log('\nAntiabuso de alertas');
+await prueba('límite: una segunda alerta en el mismo minuto es rechazada', async () => {
+  await comoSistema(`update public.alerts set created_at = created_at - interval '1 day' where user_id = $1`, [NUEVO2]);
+  await como(NUEVO2, `insert into public.alerts (user_id, type_code, lat, lng) values ($1,'fire',4.6,-74.1)`, [NUEVO2]);
+  await debeFallar(como(NUEVO2, `insert into public.alerts (user_id, type_code, lat, lng) values ($1,'fire',4.6,-74.1)`, [NUEVO2]), 'P0001');
+});
+await prueba('el personal no tiene límite de envío', async () => {
+  await nuevaAlerta(U.oper, 'fire'); await como(U.oper, `insert into public.alerts (user_id, type_code, lat, lng) values ($1,'fire',4.6,-74.1)`, [U.oper]);
+});
+await prueba('3 alertas falsas en 30 días bloquean los reportes 7 días', async () => {
+  for (let i = 0; i < 3; i++) {
+    const id = await nuevaAlerta(NUEVO2, 'robbery');
+    await debeFallar(como(NUEVO2, `select public.marcar_alerta_falsa($1)`, [id]), '42501'); // un ciudadano no puede
+    await como(U.oper, `select public.marcar_alerta_falsa($1, 'Llamada de broma')`, [id]);
+    igual((await comoSistema(`select status, marcada_falsa from public.alerts where id = $1`, [id])).rows[0].marcada_falsa, true);
+  }
+  const p = await comoSistema(`select reportes_falsos, bloqueado_hasta > now() + interval '6 days' b from public.profiles where id = $1`, [NUEVO2]);
+  igual(p.rows[0].reportes_falsos, 3); igual(p.rows[0].b, true);
+  igual((await como(NUEVO2, `select public.puede_reportar() p`)).rows[0].p, false);
+  await debeFallar(nuevaAlerta(NUEVO2, 'fire'));
+  igual((await como(NUEVO2, `select puede_reportar from public.mi_estado_reporte()`)).rows[0].puede_reportar, false);
+});
+
+console.log('\nAdministración de cédulas');
+await prueba('admin ve el número (y queda auditado); auditor y ciudadano no', async () => {
+  const r = await como(U.admin, `select * from public.admin_ver_cedula($1)`, [NUEVO1]);
+  igual(r.rows[0].numero, '1023456789'); igual(r.rows[0].fecha_expedicion, '2010-05-14');
+  igual((await comoSistema(`select count(*)::int n from public.auditoria where accion = 'ver_cedula'`)).rows[0].n, 1);
+  await debeFallar(como(U.audi, `select * from public.admin_ver_cedula($1)`, [NUEVO1]), '42501');
+  await debeFallar(como(NUEVO2, `select * from public.admin_ver_cedula($1)`, [NUEVO1]), '42501');
+  igual((await como(U.audi, `select * from public.admin_listar_cedulas()`)).rows.length >= 3, true);
+});
+await prueba('suplantación: el admin libera la cédula y suspende la cuenta', async () => {
+  await debeFallar(como(U.admin, `select public.admin_liberar_cedula($1, '')`, [NUEVO3]), '22023');
+  await como(U.admin, `select public.admin_liberar_cedula($1, 'Denuncia de suplantación')`, [NUEVO3]);
+  igual((await comoSistema(`select status from public.profiles where id = $1`, [NUEVO3])).rows[0].status, 'suspended');
+  const libre = '00000000-0000-0000-0000-000000000104';
+  await registrarAuth(libre, '80555666', '2005-03-03'); // la cédula quedó libre
 });
 
 console.log('\nDispositivos y disparo de notificaciones');

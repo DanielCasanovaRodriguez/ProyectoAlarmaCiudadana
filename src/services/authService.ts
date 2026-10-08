@@ -1,5 +1,5 @@
 import { supabase } from '../utils/supabase/client';
-import { toUserMessage } from '../utils/errors';
+import { toUserMessage, toAppError } from '../utils/errors';
 import type { Database } from '../types/database.types';
 
 // ================================================================
@@ -15,7 +15,7 @@ export type UserProfile = Database['public']['Tables']['profiles']['Row'];
 export async function registrarUsuario(
   email: string,
   password: string,
-  datos: { nombres: string; apellidos: string; phone?: string },
+  datos: { nombres: string; apellidos: string; phone?: string; cedula: string; fechaExpedicion: string },
 ) {
   const { data, error } = await supabase.auth.signUp({
     email,
@@ -27,6 +27,10 @@ export async function registrarUsuario(
         apellidos: datos.apellidos,
         full_name: `${datos.nombres} ${datos.apellidos}`.trim(),
         phone:     datos.phone ?? null,
+        // La BD valida la cédula, garantiza que sea única, la guarda cifrada
+        // y la elimina de estos metadatos (no queda en texto plano).
+        cedula:           datos.cedula,
+        fecha_expedicion: datos.fechaExpedicion,
       },
     },
   });
@@ -246,10 +250,13 @@ export async function signUp(data: {
   nombres:   string;
   apellidos: string;
   phone?:    string;
+  cedula:    string;
+  fechaExpedicion: string;
 }) {
   try {
     const result = await registrarUsuario(data.email, data.password, {
       nombres: data.nombres, apellidos: data.apellidos, phone: data.phone,
+      cedula: data.cedula, fechaExpedicion: data.fechaExpedicion,
     });
     return { data: result, error: null };
   } catch (error: any) {
@@ -283,4 +290,48 @@ export async function verifyPasswordResetOTP(email: string, code: string) {
   } catch (error: any) {
     return { success: false, error: toUserMessage(error) };
   }
+}
+
+// ================================================================
+// Acceso de ciudadanos con CÉDULA + contraseña
+// (Edge Function acceso-cedula: limita intentos, no revela el correo)
+// ================================================================
+export class AccesoCedulaError extends Error {
+  codigo?: string;
+  emailEnmascarado?: string;
+  constructor(mensaje: string, codigo?: string, emailEnmascarado?: string) {
+    super(mensaje);
+    this.name = 'AccesoCedulaError';
+    this.codigo = codigo;
+    this.emailEnmascarado = emailEnmascarado;
+  }
+}
+
+async function llamarAccesoCedula(body: Record<string, string>) {
+  const { data, error } = await supabase.functions.invoke('acceso-cedula', { body });
+  if (error) {
+    // Errores HTTP de la función: traen un mensaje ya preparado para el usuario
+    const ctx = (error as { context?: Response }).context;
+    let cuerpo: { error?: string; codigo?: string; email_enmascarado?: string } | null = null;
+    if (ctx && typeof ctx.json === 'function') {
+      try { cuerpo = await ctx.json(); } catch { cuerpo = null; }
+    }
+    if (cuerpo?.error) throw new AccesoCedulaError(cuerpo.error, cuerpo.codigo, cuerpo.email_enmascarado);
+    throw toAppError(error, 'No se pudo iniciar sesión. Intenta de nuevo.');
+  }
+  const s = data as { access_token?: string; refresh_token?: string };
+  if (!s?.access_token || !s?.refresh_token) throw new Error('No se pudo iniciar sesión. Intenta de nuevo.');
+  const { data: sesion, error: errSesion } = await supabase.auth.setSession({
+    access_token: s.access_token, refresh_token: s.refresh_token,
+  });
+  if (errSesion || !sesion.session) throw toAppError(errSesion, 'No se pudo iniciar sesión. Intenta de nuevo.');
+  return sesion;
+}
+
+export function iniciarSesionConCedula(cedula: string, password: string) {
+  return llamarAccesoCedula({ accion: 'ingresar', cedula, password });
+}
+
+export function confirmarCorreoConCedula(cedula: string, codigo: string) {
+  return llamarAccesoCedula({ accion: 'confirmar', cedula, codigo });
 }

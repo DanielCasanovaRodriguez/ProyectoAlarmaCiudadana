@@ -65,6 +65,9 @@ const TIEMPO = /timeout|timed out|aborterror|the operation was aborted|tard[oó]
 
 /** Reglas: patrón del mensaje o código → tipo y texto amigable. */
 const REGLAS: Array<{ test: (m: string, code: string, status?: number) => boolean; kind: ErrorKind; msg: string }> = [
+  // Registro: la BD rechazó la cédula (ya registrada) dentro de la creación del usuario
+  { test: (m, c) => /cedula_no_disponible|database error saving new user/i.test(m) || (c === 'unexpected_failure' && /saving new user/i.test(m)),
+    kind: 'duplicate', msg: 'No fue posible completar el registro con esa cédula. Si ya tienes una cuenta, inicia sesión con tu cédula; si crees que alguien la está usando, contáctanos.' },
   // Autenticación (Supabase Auth)
   { test: (m, c) => c === 'invalid_credentials' || /invalid login credentials/i.test(m),
     kind: 'auth', msg: 'Credenciales inválidas: el correo o la contraseña no son correctos.' },
