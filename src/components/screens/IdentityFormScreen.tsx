@@ -13,14 +13,16 @@ interface IdentityFormScreenProps {
   actual?: MiIdentidad | null;
   onListo: (ultimosDigitos: string) => void;
   onVolver: () => void;
-  onAhoraNo?: () => void;
+  /** Cuenta anterior sin cédula completa: no se puede omitir (solo salir). */
+  obligatoria?: boolean;
+  onCerrarSesion?: () => void;
 }
 
 /**
  * Cuentas existentes: registran su cédula (número + fecha de expedición)
  * para poder reportar alertas. Una cédula = una cuenta.
  */
-export function IdentityFormScreen({ nombre, actual, onListo, onVolver, onAhoraNo }: IdentityFormScreenProps) {
+export function IdentityFormScreen({ nombre, actual, onListo, onVolver, obligatoria, onCerrarSesion }: IdentityFormScreenProps) {
   const [cedula, setCedula] = useState('');
   const [fecha, setFecha] = useState('');
   const [autoriza, setAutoriza] = useState(false);
@@ -49,9 +51,11 @@ export function IdentityFormScreen({ nombre, actual, onListo, onVolver, onAhoraN
   return (
     <div className="h-full bg-white flex flex-col">
       <div className="flex items-center gap-4 px-6 py-4 border-b">
-        <button onClick={onVolver} className="p-2 -ml-2 hover:bg-gray-100 rounded-full" aria-label="Volver">
-          <ArrowLeft className="w-6 h-6 text-gray-700" />
-        </button>
+        {!obligatoria && (
+          <button onClick={onVolver} className="p-2 -ml-2 hover:bg-gray-100 rounded-full" aria-label="Volver">
+            <ArrowLeft className="w-6 h-6 text-gray-700" />
+          </button>
+        )}
         <h1 className="text-gray-900">Registra tu cédula</h1>
       </div>
 
@@ -108,13 +112,14 @@ export function IdentityFormScreen({ nombre, actual, onListo, onVolver, onAhoraN
             <Button onClick={enviar} disabled={enviando} size="lg" className="w-full bg-blue-600 hover:bg-blue-700 text-white">
               {enviando ? 'Guardando…' : 'Guardar mi cédula'}
             </Button>
-            {onAhoraNo && (
-              <Button onClick={onAhoraNo} variant="outline" size="lg" className="w-full" disabled={enviando}>Ahora no</Button>
+            {obligatoria && onCerrarSesion && (
+              <Button onClick={onCerrarSesion} variant="outline" size="lg" className="w-full" disabled={enviando}>Cerrar sesión</Button>
             )}
           </div>
-          {onAhoraNo && (
+          {obligatoria && (
             <p className="text-xs text-gray-500 text-center">
-              Sin cédula podrás ver el mapa, pero no reportar alertas. En una emergencia llama siempre a la Línea 123.
+              Tu cuenta se creó antes de este requisito: completa estos datos una sola vez para seguir usando la app.
+              En una emergencia llama ya a la <a href="tel:123" className="text-blue-600 font-medium underline">Línea 123</a>.
             </p>
           )}
         </div>

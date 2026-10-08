@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { toUserMessage, isOfflineError } from './utils/errors';
+import { toUserMessage, isOfflineError, toAppError } from './utils/errors';
 import { WelcomeScreen } from './components/screens/WelcomeScreen';
 import { OnboardingScreen } from './components/screens/OnboardingScreen';
 import { LocationPermissionScreen } from './components/screens/LocationPermissionScreen';
@@ -509,15 +509,16 @@ export default function App() {
     if (appState.auth.isLoggedIn && appState.identidad === undefined) refrescarIdentidad();
   }, [appState.auth.isLoggedIn, appState.identidad]);
 
-  // Cuentas existentes sin cédula (o rechazada): se ofrece verificar una vez por sesión
-  const ofrecidaVerificacion = useRef(false);
+  // Cuentas creadas antes de la cédula (sin cédula o sin fecha de expedición):
+  // al abrir la app se les pide completarla antes de continuar. No aplica al
+  // personal (el servidor ya les permite reportar: puede_reportar = true).
+  const cedulaPendiente = appState.identidad !== undefined
+    && !identidadPermiteReportar(appState.identidad)
+    && appState.estadoReporte?.puede_reportar === false;
   useEffect(() => {
-    if (appState.currentScreen !== 'main-map' || ofrecidaVerificacion.current) return;
-    if (appState.identidad === undefined) return;
-    if (identidadPermiteReportar(appState.identidad)) return;
-    ofrecidaVerificacion.current = true;
+    if (appState.currentScreen !== 'main-map' || !cedulaPendiente) return;
     setAppState(prev => ({ ...prev, currentScreen: 'identity-form' }));
-  }, [appState.currentScreen, appState.identidad]);
+  }, [appState.currentScreen, cedulaPendiente]);
 
   const bloqueadoHasta = appState.estadoReporte?.bloqueado_hasta && new Date(appState.estadoReporte.bloqueado_hasta) > new Date()
     ? new Date(appState.estadoReporte.bloqueado_hasta) : null;
@@ -554,8 +555,12 @@ export default function App() {
   ): Promise<void> => {
 
     // 0. Solo cuentas con verificación de identidad enviada (la BD también lo exige)
-    if (appState.identidad !== undefined && !identidadPermiteReportar(appState.identidad)) {
-      throw new Error('Para reportar alertas necesitas registrar tu cédula.');
+    //    Si aún no se consultó (p. ej. sin conexión al abrir), se consulta ahora.
+    const identidadActual = appState.identidad !== undefined ? appState.identidad : await refrescarIdentidad();
+    if (identidadActual !== undefined && !identidadPermiteReportar(identidadActual)) {
+      throw new Error(identidadActual
+        ? 'Para reportar alertas confirma la fecha de expedición de tu cédula (menú → Perfil → Registrar).'
+        : 'Para reportar alertas necesitas registrar tu cédula (menú → Perfil → Registrar).');
     }
 
     // 1. Ubicación fresca del GPS en el momento del SOS. Si no se puede
@@ -576,13 +581,32 @@ export default function App() {
 
     // 2. Guardar en la BD. Solo se confirma al usuario cuando el servidor
     //    respondió; si falla, el error llega a AlarmSheet para reintentar.
-    const alertaCreada = await createAlertDB({
-      type_code:   type,
-      lat:         location.lat,
-      lng:         location.lng,
-      description: description || undefined,
-      media_urls:  [],
-    });
+    let alertaCreada: Awaited<ReturnType<typeof createAlertDB>>;
+    try {
+      alertaCreada = await createAlertDB({
+        type_code:   type,
+        lat:         location.lat,
+        lng:         location.lng,
+        description: description || undefined,
+        media_urls:  [],
+      });
+    } catch (err) {
+      // La BD rechaza (RLS) a quien no puede reportar: se explica el motivo real
+      if (toAppError(err).kind === 'permission') {
+        const [i, e] = await Promise.all([
+          refrescarIdentidad(), obtenerEstadoReporte().catch(() => null),
+        ]);
+        if (e?.bloqueado_hasta && new Date(e.bloqueado_hasta) > new Date()) {
+          throw new Error('Tus reportes están suspendidos temporalmente porque varias de tus alertas fueron marcadas como falsas.');
+        }
+        if (i !== undefined && !identidadPermiteReportar(i)) {
+          throw new Error(i
+            ? 'Para reportar alertas confirma la fecha de expedición de tu cédula (menú → Perfil → Registrar).'
+            : 'Para reportar alertas necesitas registrar tu cédula (menú → Perfil → Registrar).');
+        }
+      }
+      throw err;
+    }
 
     const alertaGuardada: Alert = {
       id:          alertaCreada.id,
@@ -703,7 +727,6 @@ export default function App() {
     try { await cerrarSesion(); } catch (err) { console.warn('Error al cerrar sesión:', err); }
     ['admin_user', 'admin_profile', 'admin_token', 'admin_access_token', PERFIL_LOCAL_KEY].forEach(k => localStorage.removeItem(k));
     pushRegistered.current = false;
-    ofrecidaVerificacion.current = false;
     olvidarUbicacionEnviada();
     updateAppState({
       identidad:           undefined,
@@ -820,8 +843,9 @@ export default function App() {
               toast.success('Cédula registrada', { description: `Terminada en ${ultimos}. Desde ahora es tu usuario para ingresar.` });
               setAppState(prev => ({ ...prev, identidad: undefined, currentScreen: 'main-map' }));
             }}
+            obligatoria={cedulaPendiente}
             onVolver={() => navigateToScreen('main-map')}
-            onAhoraNo={() => navigateToScreen('main-map')}
+            onCerrarSesion={handleLogout}
           />
         );
 
