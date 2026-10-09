@@ -896,6 +896,16 @@ await prueba('probar notificaciones: sin dispositivo avisa; con dispositivo, 1 p
   igual(typeof r.ok, 'boolean');
   await debeFallar(como('anon', `select public.probar_mis_notificaciones()`), '42501');
 });
+await prueba('mensaje del personal: llega a la bandeja del autor; ciudadanos no pueden enviarlo', async () => {
+  const id = await nuevaAlerta(U.ana);
+  const r = (await como(U.oper, `select public.enviar_mensaje_ciudadano($1, 'La patrulla va en camino') r`, [id])).rows[0].r;
+  igual(r.ok, true);
+  const bandeja = (await como(U.ana, `select titulo, mensaje from public.notificaciones where alerta_id = $1`, [id])).rows;
+  igual(bandeja.length, 1); igual(bandeja[0].mensaje, 'La patrulla va en camino');
+  igual((await como(U.beto, `select count(*)::int n from public.notificaciones where alerta_id = $1`, [id])).rows[0].n, 0, 'otro ciudadano no lo ve');
+  await debeFallar(como(U.beto, `select public.enviar_mensaje_ciudadano($1, 'hola hola')`, [id]), '42501');
+  await debeFallar(como(U.oper, `select public.enviar_mensaje_ciudadano($1, 'x')`, [id]), '22023');
+});
 await prueba('la tarea de cierre no se puede llamar desde la app', async () => {
   await debeFallar(como(U.ana, `select public.cerrar_alertas_vencidas()`), '42501');
 });

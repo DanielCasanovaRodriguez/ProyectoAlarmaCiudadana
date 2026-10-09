@@ -9,6 +9,7 @@ import { getCurrentUserProfile } from '../../services/adminService';
 import { toast } from 'sonner';
 import { EmailVerificationScreen } from './EmailVerificationScreen';
 import { sendLoginOTP } from '../../utils/verificationCode';
+import { APP_VERSION } from '../../config/app';
 
 // ================================================================
 // TIPOS
@@ -47,7 +48,6 @@ export function CollaboratorLoginScreen({ onBack, onLoginSuccess }: Collaborator
       return;
     }
 
-    console.log('🔐 Intento de login colaborador:', email);
     setLoading(true);
 
     try {
@@ -82,7 +82,6 @@ export function CollaboratorLoginScreen({ onBack, onLoginSuccess }: Collaborator
         return;
       }
 
-      console.log('✅ Perfil obtenido:', profile);
 
       // ── PASO 3: Segundo factor ────────────────────────────────────
       // La contraseña ya fue validada. Se cierra esa sesión para que el
@@ -204,11 +203,11 @@ export function CollaboratorLoginScreen({ onBack, onLoginSuccess }: Collaborator
       </div>
 
       {/* Content */}
-      <div className="flex-1 flex flex-col items-center justify-center p-6">
-        <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-8">
+      <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 overflow-y-auto">
+        <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-5 sm:p-8">
 
           {/* Logo y título */}
-          <div className="text-center mb-8">
+          <div className="text-center mb-6 sm:mb-8">
             <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <Shield className="w-8 h-8 text-blue-600" />
             </div>
@@ -236,9 +235,11 @@ export function CollaboratorLoginScreen({ onBack, onLoginSuccess }: Collaborator
                   placeholder="correo@ejemplo.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="pl-10"
+                  className="pl-10 h-11 text-base"
                   disabled={loading}
                   autoComplete="email"
+                  inputMode="email"
+                  autoCapitalize="none"
                 />
               </div>
             </div>
@@ -256,7 +257,7 @@ export function CollaboratorLoginScreen({ onBack, onLoginSuccess }: Collaborator
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="pl-10 pr-10"
+                  className="pl-10 pr-10 h-11 text-base"
                   disabled={loading}
                   autoComplete="current-password"
                 />
@@ -265,7 +266,7 @@ export function CollaboratorLoginScreen({ onBack, onLoginSuccess }: Collaborator
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors z-10"
                   disabled={loading}
-                  tabIndex={-1}
+                  aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
                 >
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
@@ -303,8 +304,8 @@ export function CollaboratorLoginScreen({ onBack, onLoginSuccess }: Collaborator
       </div>
 
       {/* Footer */}
-      <div className="flex-shrink-0 text-center p-6 text-white/70 text-xs">
-        <p>AlertaCiudadana v1.0.0</p>
+      <div className="flex-shrink-0 text-center p-4 sm:p-6 text-white/70 text-xs" style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
+        <p>Alerta Ciudadana v{APP_VERSION}</p>
         <p className="mt-1">Sistema de gestión de alertas ciudadanas</p>
       </div>
     </div>

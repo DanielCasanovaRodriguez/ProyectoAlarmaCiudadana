@@ -23,3 +23,16 @@ export async function probarNotificaciones(): Promise<ResultadoPrueba> {
   }
   return { ok: false, motivo: 'sin_dispositivo' };
 }
+
+export interface MensajeAlerta { id: string; mensaje: string; created_at: string }
+
+/** Mensajes del personal sobre una alerta propia (paso 16). */
+export async function getMensajesAlerta(alertId: string): Promise<MensajeAlerta[]> {
+  const { data, error } = await supabase.from('notificaciones')
+    .select('id, mensaje, created_at')
+    .eq('alerta_id', alertId)
+    .eq('titulo', 'Mensaje sobre tu alerta')
+    .order('created_at', { ascending: true });
+  if (error) return [];
+  return (data ?? []) as MensajeAlerta[];
+}

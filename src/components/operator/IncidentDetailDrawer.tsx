@@ -19,12 +19,14 @@ import {
   getIncidentTimeline,
 } from '../../services/incidentService';
 import { useSignedMediaUrls } from '../../hooks/useSignedMediaUrls';
-import { marcarAlertaFalsa } from '../../services/incidentService';
+import { marcarAlertaFalsa, enviarMensajeCiudadano } from '../../services/incidentService';
+import { Input } from '../ui/input';
 import { toast } from 'sonner';
 
 interface IncidentDetailDrawerProps {
   incident:        Incident;
-  units:           Unit[];
+  /** (Ya no se usa: las unidades se registran a mano.) */
+  units?:          Unit[];
   onClose:         () => void;
   onIncidentUpdate:(incidentId: string, patch: Partial<Incident>) => void;
 }
@@ -38,15 +40,20 @@ export function IncidentDetailDrawer({
   onIncidentUpdate,
 }: IncidentDetailDrawerProps) {
   const signedMedia = useSignedMediaUrls(incident?.mediaUrls);
-  const [selectedUnit,  setSelectedUnit]  = useState(incident.unitName ?? '');
+  const [tipoUnidad,    setTipoUnidad]    = useState(incident.unitType ?? 'Policía');
+  const [nombreUnidad,  setNombreUnidad]  = useState('');
+  const [etaUnidad,     setEtaUnidad]     = useState('');
   const [note,          setNote]          = useState('');
-  const [msgTemplate,   setMsgTemplate]   = useState('');
+  const [mensaje,       setMensaje]       = useState('');
+  const [enviando,      setEnviando]      = useState(false);
   const [assigning,     setAssigning]     = useState(false);
   const [updating,      setUpdating]      = useState(false);
   const [timeline,      setTimeline]      = useState<TimelineEntry[]>([]);
   const [timelineLoading, setTimelineLoading] = useState(true);
 
-  // Plantillas de mensaje
+  const TIPOS_UNIDAD = ['Policía', 'Ambulancia', 'Bomberos', 'Defensa Civil', 'Tránsito', 'Otra'];
+
+  // Plantillas de mensaje (se pueden editar antes de enviar)
   const MSG_TEMPLATES = [
     'La unidad va en camino. Permanece a salvo.',
     'Ayuda en camino. Mantente en el lugar si es seguro.',
@@ -90,28 +97,26 @@ export function IncidentDetailDrawer({
 
   // ── Asignar unidad ────────────────────────────────────────────
   const handleAssign = async () => {
-    if (!selectedUnit) return;
+    const nombre = nombreUnidad.trim();
+    if (!nombre) { toast.error('Escribe qué unidad se envió (p. ej. "Patrulla CAI Kennedy 34")'); return; }
+    const eta = etaUnidad ? Math.min(240, Math.max(1, parseInt(etaUnidad, 10) || 0)) : undefined;
     setAssigning(true);
-
-    const unit = units.find(u => u.name === selectedUnit);
-
-    const { error } = await assignUnitToIncident(
-      incident.id,
-      selectedUnit,
-      unit?.type ?? 'Policía',
-      unit?.eta,
-    );
-
+    const { error } = await assignUnitToIncident(incident.id, nombre, tipoUnidad, eta);
     if (error) {
-      toast.error('Error al asignar unidad', { description: error });
-    } else {
-      onIncidentUpdate(incident.id, {
-        unitName: selectedUnit,
-        unitType: unit?.type,
-        status:   incident.status === 'open' ? 'ack' : incident.status,
-      });
-      toast.success(`Unidad ${selectedUnit} asignada${unit?.eta ? ` · ETA ${unit.eta} min` : ''}`);
+      toast.error('No se pudo registrar la unidad', { description: error });
+      setAssigning(false);
+      return;
     }
+    // Si estaba "Recibida", pasa a "En atención" también en la BD
+    let nuevoEstado = incident.status;
+    if (incident.status === 'open') {
+      const r = await updateIncidentStatus(incident.id, 'ack', 'open', `Unidad enviada: ${tipoUnidad} · ${nombre}`);
+      if (!r.error) nuevoEstado = 'ack';
+    }
+    onIncidentUpdate(incident.id, { unitName: nombre, unitType: tipoUnidad, status: nuevoEstado });
+    toast.success(`${tipoUnidad} · ${nombre} registrada${eta ? ` · llega en ~${eta} min` : ''}`);
+    setNombreUnidad('');
+    setEtaUnidad('');
     setAssigning(false);
   };
 
@@ -162,21 +167,33 @@ export function IncidentDetailDrawer({
     setUpdating(false);
   };
 
-  const handleSendMessage = () => {
-    if (!msgTemplate) return;
-    toast.success('Mensaje enviado al ciudadano');
-    setMsgTemplate('');
+  const handleSendMessage = async () => {
+    const texto = mensaje.trim();
+    if (texto.length < 3) return;
+    setEnviando(true);
+    const { error, push } = await enviarMensajeCiudadano(incident.id, texto);
+    setEnviando(false);
+    if (error) { toast.error('No se pudo enviar el mensaje', { description: error }); return; }
+    toast.success('Mensaje enviado al ciudadano', {
+      description: push ? 'Le llega como notificación y lo ve en el detalle de su alerta.' : 'Lo verá en el detalle de su alerta.',
+    });
+    setMensaje('');
   };
+
 
   const isClosed = incident.status === 'resolved';
   const mapsUrl  = `https://www.google.com/maps?q=${incident.lat},${incident.lng}`;
 
   // ── Render ────────────────────────────────────────────────────
   return (
-    <div className="fixed inset-y-0 right-0 w-full md:w-[600px] bg-white shadow-2xl flex flex-col" style={{ zIndex: 9999 }}>
+    <>
+    {/* Fondo: toca fuera para cerrar (z-40: las listas y diálogos usan z-50 y quedan encima) */}
+    <div className="fixed inset-0 bg-black/30 z-40 hidden md:block" onClick={onClose} aria-hidden />
+    <div className="fixed inset-y-0 right-0 w-full md:w-[560px] bg-white shadow-2xl flex flex-col z-40" role="dialog" aria-label="Detalle del incidente"
+      style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
 
       {/* Header */}
-      <div className="flex-shrink-0 bg-white border-b border-gray-200 px-6 py-4">
+      <div className="flex-shrink-0 bg-white border-b border-gray-200 px-4 sm:px-6 py-3 sm:py-4">
         <div className="flex items-start justify-between">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">Detalle del Incidente</h2>
@@ -189,7 +206,7 @@ export function IncidentDetailDrawer({
       </div>
 
       {/* Contenido scroll */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5 sm:space-y-6">
 
         {/* Estado y severidad */}
         <div className="flex items-center gap-3 flex-wrap">
@@ -306,65 +323,54 @@ export function IncidentDetailDrawer({
           <>
             <Separator />
 
-            {/* Asignar unidad */}
+            {/* Unidad enviada */}
             <div>
               <Label className="mb-2 block text-sm font-semibold">
                 <Shield className="w-4 h-4 inline mr-1.5 text-blue-600" />
-                Asignar unidad
+                Registrar unidad enviada
               </Label>
-              <div className="flex gap-2">
-                <Select value={selectedUnit} onValueChange={setSelectedUnit}>
-                  <SelectTrigger className="flex-1">
-                    <SelectValue placeholder="Seleccionar unidad..." />
-                  </SelectTrigger>
+              {incident.unitName && (
+                <p className="text-xs text-gray-600 mb-2">Última registrada: <strong>{incident.unitType ? `${incident.unitType} · ` : ''}{incident.unitName}</strong></p>
+              )}
+              <div className="grid grid-cols-1 sm:grid-cols-[9rem_1fr] gap-2">
+                <Select value={tipoUnidad} onValueChange={setTipoUnidad}>
+                  <SelectTrigger aria-label="Tipo de unidad"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {units.map(unit => (
-                      <SelectItem
-                        key={unit.id}
-                        value={unit.name}
-                        disabled={unit.status === 'Ocupada'}
-                      >
-                        <div className="flex items-center justify-between w-full gap-4">
-                          <span>{unit.name}</span>
-                          <span className="text-xs text-gray-500 ml-auto">
-                            {unit.status === 'Disponible' ? '✓' : unit.status}
-                            {unit.eta ? ` · ETA ${unit.eta} min` : ''}
-                          </span>
-                        </div>
-                      </SelectItem>
-                    ))}
+                    {TIPOS_UNIDAD.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                   </SelectContent>
                 </Select>
-                <Button onClick={handleAssign} disabled={!selectedUnit || assigning}>
-                  {assigning ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Asignar'}
+                <Input value={nombreUnidad} onChange={e => setNombreUnidad(e.target.value.slice(0, 60))}
+                  placeholder="Ej.: Patrulla CAI Kennedy 34" aria-label="Unidad enviada" className="text-base sm:text-sm" />
+              </div>
+              <div className="flex gap-2 mt-2">
+                <Input value={etaUnidad} onChange={e => setEtaUnidad(e.target.value.replace(/\D/g, '').slice(0, 3))}
+                  inputMode="numeric" placeholder="Llega en (min)" aria-label="Minutos estimados de llegada" className="w-36 text-base sm:text-sm" />
+                <Button onClick={handleAssign} disabled={!nombreUnidad.trim() || assigning} className="flex-1">
+                  {assigning ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Registrar'}
                 </Button>
               </div>
             </div>
 
-            {/* Enviar mensaje */}
+            {/* Mensaje al ciudadano */}
             <div>
               <Label className="mb-2 block text-sm font-semibold">
                 <Send className="w-4 h-4 inline mr-1.5 text-green-600" />
-                Enviar mensaje al ciudadano
+                Mensaje al ciudadano
               </Label>
-              <div className="space-y-2">
-                <Select value={msgTemplate} onValueChange={setMsgTemplate}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Seleccionar plantilla..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {MSG_TEMPLATES.map((t, i) => (
-                      <SelectItem key={i} value={t}>{t}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Button
-                  onClick={handleSendMessage}
-                  disabled={!msgTemplate}
-                  variant="outline"
-                  className="w-full"
-                >
-                  <Send className="w-4 h-4 mr-2" />
+              <div className="flex gap-1.5 overflow-x-auto pb-2 -mx-1 px-1">
+                {MSG_TEMPLATES.map(t => (
+                  <button key={t} type="button" onClick={() => setMensaje(t)}
+                    className="flex-shrink-0 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full px-3 py-1.5 whitespace-nowrap">
+                    {t.length > 34 ? t.slice(0, 32) + '…' : t}
+                  </button>
+                ))}
+              </div>
+              <Textarea value={mensaje} onChange={e => setMensaje(e.target.value.slice(0, 300))} rows={2}
+                placeholder="Escribe o elige un mensaje" aria-label="Mensaje al ciudadano" className="text-base sm:text-sm" />
+              <div className="flex items-center justify-between mt-2 gap-2">
+                <span className="text-xs text-gray-400">{mensaje.length}/300 · le llega como notificación</span>
+                <Button onClick={handleSendMessage} disabled={mensaje.trim().length < 3 || enviando} variant="outline">
+                  {enviando ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
                   Enviar
                 </Button>
               </div>
@@ -446,5 +452,6 @@ export function IncidentDetailDrawer({
         )}
       </div>
     </div>
+    </>
   );
 }

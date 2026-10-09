@@ -136,6 +136,8 @@ export interface AppState {
   identidad:           MiIdentidad | null | undefined;
   // Alerta cercana abierta desde una notificación
   nearbyAlertId:       string | null;
+  /** Incidente a abrir en el panel del operador (al tocar una notificación). */
+  incidenteAbrir:      string | null;
 }
 
 // ================================================================
@@ -199,6 +201,7 @@ export default function App() {
     consentimiento:      undefined,
     identidad:           undefined,
     nearbyAlertId:       null,
+    incidenteAbrir:      null,
   });
 
   // ── Cargar historial propio del usuario ──────────────────────────
@@ -449,10 +452,14 @@ export default function App() {
         toqueePendiente.current = datos; // se abre al terminar de restaurar la sesión
         return prev;
       }
-      if (datos.tipo === 'estado') {
+      if (datos.tipo === 'estado' || datos.tipo === 'mensaje') {
         return { ...prev, selectedAlertId: datos.alert_id!, currentScreen: 'alert-detail' };
       }
-      if (['operator-dashboard', 'admin-panel'].includes(prev.currentScreen)) return prev;
+      // Personal: se abre el incidente en su panel
+      if (prev.currentScreen === 'operator-dashboard' || prev.currentScreen === 'operator-settings') {
+        return { ...prev, incidenteAbrir: datos.alert_id!, currentScreen: 'operator-dashboard' };
+      }
+      if (prev.currentScreen === 'admin-panel') return prev;
       return { ...prev, nearbyAlertId: datos.alert_id!, currentScreen: 'nearby-alert' };
     });
   };
@@ -761,6 +768,7 @@ export default function App() {
       estadoReporte:       null,
     consentimiento:      undefined,
       nearbyAlertId:       null,
+    incidenteAbrir:      null,
       auth:            { isLoggedIn: false, email: '', password: '', resetEmail: '' },
       user:            { name: '', hasLocationPermission: false, hasCompletedOnboarding: false },
       userLocation:    null,
@@ -1124,7 +1132,8 @@ export default function App() {
           <OperatorDashboard
             onNavigateToSettings={() => navigateToScreen('operator-settings')}
             onLogout={handleLogout}
-            accessToken={localStorage.getItem('admin_access_token') || undefined}
+            abrirIncidenteId={appState.incidenteAbrir}
+            onIncidenteAbierto={() => setAppState(prev => ({ ...prev, incidenteAbrir: null }))}
           />
         );
 
@@ -1133,6 +1142,7 @@ export default function App() {
           <OperatorSettingsScreen
             onBack={() => navigateToScreen('operator-dashboard')}
             onSave={() => navigateToScreen('operator-dashboard')}
+            onLogout={handleLogout}
           />
         );
 
@@ -1158,7 +1168,7 @@ export default function App() {
   }
 
   return (
-    <div className="h-screen w-full bg-gray-100">
+    <div className="h-screen h-[100dvh] w-full bg-gray-100">
       <ConnectionBanner />
       {renderCurrentScreen()}
       <Toaster />

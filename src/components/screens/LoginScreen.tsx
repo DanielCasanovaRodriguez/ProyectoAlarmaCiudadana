@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ArrowLeft, AlertCircle, Mail } from 'lucide-react';
 import { Button } from '../ui/button';
 import { AuthInput } from '../auth/AuthInput';
+import { CodigoInput } from '../auth/CodigoInput';
 import {
   signIn, cerrarSesion, iniciarSesionConCedula, confirmarCorreoConCedula, AccesoCedulaError,
 } from '../../services/authService';
@@ -84,11 +85,13 @@ export function LoginScreen({
     }
   };
 
-  const confirmarCodigo = async () => {
-    if (codigo.replace(/\D/g, '').length < 6) { setErrors({ codigo: 'Ingresa el código que te enviamos' }); return; }
+  const confirmarCodigo = async (valor = codigo) => {
+    const limpio = valor.replace(/\D/g, '');
+    if (limpio.length < 6) { setErrors({ codigo: 'Ingresa el código que te enviamos' }); return; }
+    if (isLoading) return;
     setIsLoading(true);
     try {
-      const sesion = await confirmarCorreoConCedula(soloDigitosCedula(cedula), codigo.replace(/\D/g, ''));
+      const sesion = await confirmarCorreoConCedula(soloDigitosCedula(cedula), limpio);
       toast.success('Correo confirmado');
       await continuarConSesion(sesion.user, sesion.session?.access_token);
     } catch (err) {
@@ -146,9 +149,11 @@ export function LoginScreen({
                   Tu cuenta aún no está confirmada. Te enviamos un código a <strong>{confirmando.emailEnmascarado}</strong>.
                 </p>
               </div>
-              <AuthInput label="Código de verificación" value={codigo} onChange={setCodigo} placeholder="12345678"
-                error={errors.codigo} inputMode="numeric" maxLength={10} autoComplete="one-time-code" />
-              <Button onClick={confirmarCodigo} disabled={isLoading} size="lg" className="w-full bg-blue-600 hover:bg-blue-700 text-white">
+              <CodigoInput length={8} value={codigo}
+                onChange={(v) => { setCodigo(v); setErrors(x => ({ ...x, codigo: undefined })); }}
+                onComplete={(v) => confirmarCodigo(v)} error={!!errors.codigo} disabled={isLoading} />
+              {errors.codigo && <p className="text-sm text-red-600 text-center" role="alert">{errors.codigo}</p>}
+              <Button onClick={() => confirmarCodigo()} disabled={isLoading} size="lg" className="w-full bg-blue-600 hover:bg-blue-700 text-white">
                 {isLoading ? 'Confirmando…' : 'Confirmar e ingresar'}
               </Button>
             </div>

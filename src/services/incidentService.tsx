@@ -2,7 +2,7 @@ import { supabase } from '../utils/supabase/client';
 import { toUserMessage } from '../utils/errors';
 import type { AlertStatus } from '../types/database.types';
 import { isMissingRpc } from './rpc';
-import type { Incident, TimelineEntry, Filters, Severity, IncidentType, Unit } from '../components/operator/types';
+import type { Incident, TimelineEntry, Filters, Severity, IncidentType } from '../components/operator/types';
 
 // ================================================================
 // MAPEO — type_code BD → código interno UI
@@ -227,24 +227,24 @@ export function filterIncidents(incidents: Incident[], filters: Filters): Incide
 }
 
 // ================================================================
-// UNIDADES MOCK (no hay tabla de unidades en BD)
-// ================================================================
-export function getAvailableUnits(): Unit[] {
-  return [
-    { id: 'P-12', name: 'Patrulla 12',   type: 'Policía',    status: 'Disponible' },
-    { id: 'P-07', name: 'Patrulla 07',   type: 'Policía',    status: 'Disponible' },
-    { id: 'P-15', name: 'Patrulla 15',   type: 'Policía',    status: 'En ruta',   eta: 8 },
-    { id: 'A-01', name: 'Ambulancia 01', type: 'Ambulancia', status: 'Disponible' },
-    { id: 'A-02', name: 'Ambulancia 02', type: 'Ambulancia', status: 'Ocupada'    },
-    { id: 'B-03', name: 'Bomberos 03',   type: 'Bomberos',   status: 'Disponible' },
-  ];
-}
-
-// ================================================================
 // MARCAR COMO FALSA — reporte de broma: se cierra la alerta, cuenta para
 // su autor y 3 en 30 días suspenden sus reportes 7 días (lo decide la BD).
 // ================================================================
 export async function marcarAlertaFalsa(incidentId: string, nota?: string): Promise<{ error: string | null }> {
   const { error } = await supabase.rpc('marcar_alerta_falsa', { p_alert_id: incidentId, p_nota: nota?.trim() || null });
   return { error: error ? toUserMessage(error) : null };
+}
+
+// ================================================================
+// MENSAJE AL CIUDADANO — queda en su bandeja (detalle de su alerta)
+// y le llega como notificación push (paso 16).
+// ================================================================
+export async function enviarMensajeCiudadano(incidentId: string, mensaje: string): Promise<{ error: string | null; push: boolean }> {
+  try {
+    const { data, error } = await supabase.rpc('enviar_mensaje_ciudadano', { p_alert_id: incidentId, p_mensaje: mensaje });
+    if (error) return { error: toUserMessage(error), push: false };
+    return { error: null, push: !!(data as { push?: boolean } | null)?.push };
+  } catch (err: any) {
+    return { error: toUserMessage(err), push: false };
+  }
 }

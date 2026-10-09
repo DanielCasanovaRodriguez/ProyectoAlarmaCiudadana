@@ -84,3 +84,15 @@
 
 ## Migraciones nuevas (aplicadas en producción)
 `20261008000010_interventoria_legal_alertas.sql` · `20261008000011_supresion_titular.sql` · `20261008000012_retiro_escaneo_identidad.sql`
+
+
+---
+
+# v1.7.0: funciones simuladas reemplazadas por reales
+| Antes | Ahora |
+|---|---|
+| "Enviar mensaje al ciudadano" solo mostraba "Mensaje enviado" | `enviar_mensaje_ciudadano` (paso 16): bandeja del ciudadano + push; lo ve en el detalle de su alerta. Auditado; máx. 10 por alerta |
+| Unidades inventadas en el código ("Patrulla 12", "Ambulancia 01"…) | El operador registra la unidad real (tipo + identificación + minutos); si la alerta estaba "Recibida" pasa a "En atención" en la BD (antes solo en pantalla) |
+| Preferencias del operador (sonido, SLA, intervalo) que no se guardaban ni se usaban | Eliminadas; "Probar notificaciones" real |
+| Campana del administrador con punto rojo fijo | Eliminada |
+| Listas y diálogos del detalle del incidente ocultos detrás del panel (z-index 9999) | Panel en z-40: listas y confirmaciones visibles |

@@ -83,6 +83,8 @@ const REGLAS: Array<{ test: (m: string, code: string, status?: number) => boolea
     msg: 'No se pudieron adjuntar esas evidencias (máximo 10 archivos subidos desde la app).' },
   { test: (m) => /demasiadas_solicitudes/.test(m), kind: 'validation',
     msg: 'Ya tienes 5 solicitudes en trámite. Espera la respuesta antes de enviar otra.' },
+  { test: (m) => /demasiados_mensajes/.test(m), kind: 'validation',
+    msg: 'Ya se enviaron 10 mensajes sobre esta alerta.' },
   { test: (m) => /mensaje_invalido/.test(m), kind: 'validation',
     msg: 'Describe tu solicitud (entre 10 y 2000 caracteres).' },
   { test: (m) => /respuesta_requerida/.test(m), kind: 'validation',

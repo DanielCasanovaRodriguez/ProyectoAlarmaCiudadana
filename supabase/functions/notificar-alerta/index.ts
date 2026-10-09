@@ -12,6 +12,7 @@
 //                       a la hora de reportada)
 //   DIAGNOSTICO       → solo verifica la configuración de Firebase
 //   PRUEBA            → push de prueba a una cuenta (solo desde la BD, con el secreto)
+//   MENSAJE           → mensaje del personal a quien reportó (enviar_mensaje_ciudadano)
 //
 // Secrets (supabase secrets set …), nunca en el código:
 //   FIREBASE_SERVICE_ACCOUNT  JSON de la cuenta de servicio (en una línea o en base64)
@@ -25,8 +26,10 @@ type AlertRow = {
   description: string | null; lat: number; lng: number; cierre_automatico?: boolean;
 };
 type Payload = {
-  type: 'INSERT' | 'UPDATE' | 'DELETE' | 'DIAGNOSTICO' | 'PRUEBA';
+  type: 'INSERT' | 'UPDATE' | 'DELETE' | 'DIAGNOSTICO' | 'PRUEBA' | 'MENSAJE';
   user_id?: string;
+  alert_id?: string;
+  mensaje?: string;
   table?: string;
   record?: AlertRow | null;
   old_record?: AlertRow | null;
@@ -208,6 +211,15 @@ Deno.serve(async (req) => {
         mensaje: 'Esta es una prueba de Alerta Ciudadana. Si la ves, las alertas te llegarán aunque la app esté cerrada.',
         data: { tipo: 'prueba' },
       }], false));
+    }
+
+    if (payload.type === 'MENSAJE' && payload.user_id && payload.mensaje) {
+      return Response.json(await enviarAvisos([{
+        user_id: payload.user_id,
+        titulo: '💬 Mensaje sobre tu alerta',
+        mensaje: payload.mensaje.slice(0, 300),
+        data: { alert_id: payload.alert_id ?? '', tipo: 'mensaje' },
+      }], false));   // la BD ya lo guardó en la bandeja
     }
 
     const alerta = payload.record;

@@ -506,6 +506,7 @@ export interface Database {
       // Paso 10-11: autorización de datos y solicitudes del titular
       aceptar_politica: { Args: { p_version: string }; Returns: undefined };
       probar_mis_notificaciones: { Args: Record<string, never>; Returns: unknown };
+      enviar_mensaje_ciudadano: { Args: { p_alert_id: string; p_mensaje: string }; Returns: unknown };
       crear_solicitud_titular: { Args: { p_tipo: string; p_mensaje: string }; Returns: { id: string; fecha_limite: string }[] };
       admin_responder_solicitud: { Args: { p_id: string; p_estado: string; p_respuesta: string }; Returns: undefined };
       admin_listar_solicitudes: {

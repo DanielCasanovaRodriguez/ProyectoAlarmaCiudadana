@@ -20,6 +20,7 @@ import {
 import { EvidenceImage } from '../EvidenceImage';
 import { useSignedMediaUrls } from '../../hooks/useSignedMediaUrls';
 import { Alert as AppAlert } from '../../App';
+import { getMensajesAlerta, type MensajeAlerta } from '../../services/notificacionesService';
 
 // ================================================================
 // CONFIGURACIÓN DE TIPOS DE ALERTA
@@ -138,6 +139,7 @@ export function AlertDetailScreen({
   const [cancelling,  setCancelling]  = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [error,       setError]       = useState<string | null>(null);
+  const [mensajes,    setMensajes]    = useState<MensajeAlerta[]>([]);
 
   // ── Carga de datos desde Supabase ─────────────────────────────
   const fetchAll = useCallback(async (isRefresh = false) => {
@@ -145,11 +147,13 @@ export function AlertDetailScreen({
     setError(null);
 
     try {
-      const [alertData, historyData, unitData] = await Promise.all([
+      const [alertData, historyData, unitData, mensajesData] = await Promise.all([
         getAlertById(alertId),
         getAlertStatusHistory(alertId),
         getAlertAssignedUnit(alertId),
+        getMensajesAlerta(alertId),
       ]);
+      setMensajes(mensajesData);
 
       if (!alertData) {
         setError('No se pudo cargar la alerta. Puede que haya sido eliminada.');
@@ -439,6 +443,23 @@ export function AlertDetailScreen({
             </div>
           )}
         </div>
+
+        {/* ── Mensajes del personal que atiende ────────────────── */}
+        {mensajes.length > 0 && (
+          <div className="px-4 py-4 border-b border-gray-100">
+            <h3 className="text-sm font-semibold text-gray-700 mb-3">💬 Mensajes de quien atiende tu alerta</h3>
+            <ul className="space-y-2">
+              {mensajes.map(m => (
+                <li key={m.id} className="bg-blue-50 border border-blue-100 rounded-xl px-3 py-2">
+                  <p className="text-sm text-gray-900 whitespace-pre-wrap break-words">{m.mensaje}</p>
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    {new Date(m.created_at).toLocaleString('es-CO', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {/* ── Bloque 3: Línea de tiempo de estados ─────────────── */}
         <div className="px-4 py-4 border-b border-gray-100">

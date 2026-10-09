@@ -11,23 +11,30 @@ interface OperatorSidebarProps {
   filters:         Filters;
   onFiltersChange: (filters: Filters) => void;
   onClearFilters:  () => void;
+  /** Ancho y bordes (en el celular se muestra a pantalla completa). */
+  className?:      string;
+  /** Botón para cerrar (versión celular). */
+  onClose?:        () => void;
 }
 
 export function OperatorSidebar({
   filters,
   onFiltersChange,
   onClearFilters,
+  className = 'w-64 flex-shrink-0 border-r border-gray-200',
+  onClose,
 }: OperatorSidebarProps) {
   const hasActiveFilters = Object.values(filters).some(v => v !== undefined && v !== false);
 
   return (
-    <aside className="w-64 flex-shrink-0 bg-white border-r border-gray-200 flex flex-col overflow-hidden">
+    <aside className={`${className} bg-white flex flex-col overflow-hidden`}>
       {/* Header */}
       <div className="flex-shrink-0 flex items-center justify-between px-5 py-4 border-b border-gray-100">
         <div className="flex items-center gap-2">
           <Filter className="w-4 h-4 text-gray-500" />
           <h2 className="text-sm font-semibold text-gray-900">Filtros</h2>
         </div>
+        <div className="flex items-center gap-1">
         {hasActiveFilters && (
           <Button
             variant="ghost"
@@ -39,6 +46,12 @@ export function OperatorSidebar({
             Limpiar
           </Button>
         )}
+        {onClose && (
+          <Button variant="ghost" size="sm" onClick={onClose} className="h-8 px-3 text-sm" aria-label="Cerrar filtros">
+            Listo
+          </Button>
+        )}
+        </div>
       </div>
 
       {/* Filtros */}

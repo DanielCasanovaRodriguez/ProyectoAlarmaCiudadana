@@ -49,7 +49,7 @@ export function AdminHealthScreen({ accessToken }: AdminHealthScreenProps) {
 
   if (loading && !health) {
     return (
-      <div className="p-6 space-y-6">
+      <div className="p-3 sm:p-6 space-y-4 sm:space-y-6">
         <Skeleton className="h-32 w-full" />
         <Skeleton className="h-64 w-full" />
       </div>
@@ -57,7 +57,7 @@ export function AdminHealthScreen({ accessToken }: AdminHealthScreenProps) {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6">
 
       {/* Estado general */}
       <Card>

@@ -1,12 +1,9 @@
-import { useState, useRef, useEffect } from 'react';
-import { ArrowLeft, Mail, AlertCircle } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ArrowLeft, Mail, AlertCircle, ShieldCheck, Loader2 } from 'lucide-react';
 import { Button } from '../ui/button';
+import { CodigoInput } from '../auth/CodigoInput';
 import { verifyEmailCode, sendVerificationEmail, sendLoginOTP } from '../../utils/verificationCode';
 import { toast } from 'sonner';
-
-// ================================================================
-// TIPOS
-// ================================================================
 
 interface EmailVerificationScreenProps {
   onBack:             () => void;
@@ -18,280 +15,143 @@ interface EmailVerificationScreenProps {
   verificationType?:  'signup' | 'email';
 }
 
-// ================================================================
-// COMPONENTE
-// ================================================================
+/** Supabase envía códigos de 8 dígitos (registro y acceso de colaboradores). */
+const CODE_LENGTH = 8;
+const ESPERA_REENVIO_S = 60;
 
 export function EmailVerificationScreen({
   onBack,
   onVerify,
   email,
-  title       = 'Verificación de correo',
-  subtitle    = 'Ingresa el código de 8 dígitos enviado a tu correo',
-  isAdminLogin      = false,
-  verificationType  = 'signup',
+  title            = 'Verificación de correo',
+  subtitle         = 'Ingresa el código de 8 dígitos enviado a tu correo',
+  isAdminLogin     = false,
+  verificationType = 'signup',
 }: EmailVerificationScreenProps) {
-
-  // 8 dígitos para registro (códigos de Supabase signup)
-  // 6 dígitos para login de admin (OTP de signInWithOtp)
-  const CODE_LENGTH = 8;
-
-  const [code,        setCode]        = useState<string[]>(Array(CODE_LENGTH).fill(''));
+  const [code,        setCode]        = useState('');
   const [error,       setError]       = useState('');
   const [isLoading,   setIsLoading]   = useState(false);
   const [isResending, setIsResending] = useState(false);
+  const [espera,      setEspera]      = useState(ESPERA_REENVIO_S);
 
-  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
-
-  // Auto-focus primer input al montar
+  // Cuenta regresiva para reenviar (evita el bloqueo por exceso de correos)
   useEffect(() => {
-    inputRefs.current[0]?.focus();
-  }, []);
+    if (espera <= 0) return;
+    const t = setTimeout(() => setEspera(s => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [espera]);
 
-  // ── Manejo de inputs ─────────────────────────────────────────────
-
-  const handleChange = (index: number, value: string) => {
-    if (value && !/^\d$/.test(value)) return; // solo dígitos
-
-    const newCode    = [...code];
-    newCode[index]   = value;
-    setCode(newCode);
-    setError('');
-
-    if (value && index < CODE_LENGTH - 1) {
-      inputRefs.current[index + 1]?.focus();
-    }
-  };
-
-  const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Backspace' && !code[index] && index > 0) {
-      inputRefs.current[index - 1]?.focus();
-    }
-  };
-
-  const handlePaste = (e: React.ClipboardEvent) => {
-    e.preventDefault();
-    const pastedData = e.clipboardData.getData('text').slice(0, CODE_LENGTH);
-    if (!/^\d+$/.test(pastedData)) return;
-
-    const newCode = [...code];
-    for (let i = 0; i < pastedData.length && i < CODE_LENGTH; i++) {
-      newCode[i] = pastedData[i];
-    }
-    setCode(newCode);
-    setError('');
-
-    const nextEmpty = newCode.findIndex(c => !c);
-    if (nextEmpty !== -1) {
-      inputRefs.current[nextEmpty]?.focus();
-    } else {
-      inputRefs.current[CODE_LENGTH - 1]?.focus();
-    }
-  };
-
-  // ── Verificar código ─────────────────────────────────────────────
-
-  const handleVerify = async () => {
-    const enteredCode = code.join('');
-
-    if (enteredCode.length !== CODE_LENGTH) {
-      setError(`Ingresa el código completo de ${CODE_LENGTH} dígitos`);
+  const verificar = async (valor = code) => {
+    if (valor.length !== CODE_LENGTH || isLoading) {
+      if (valor.length !== CODE_LENGTH) setError(`Ingresa los ${CODE_LENGTH} dígitos del código`);
       return;
     }
-
     setIsLoading(true);
     setError('');
-
     try {
-      // El código se valida únicamente contra Supabase Auth
-      console.log(`🔐 Verificando código con Supabase (tipo: ${verificationType}) para: ${email}`);
-      const result = await verifyEmailCode(email, enteredCode, verificationType);
-
+      const result = await verifyEmailCode(email, valor, verificationType);
       if (!result.success) {
-        console.error('❌ Código incorrecto o expirado:', result.error);
-        setError(result.error || 'Código incorrecto. Por favor verifica e intenta de nuevo.');
-        setCode(Array(CODE_LENGTH).fill(''));
-        inputRefs.current[0]?.focus();
-        setIsLoading(false);
+        setError(result.error || 'Código incorrecto o vencido. Revisa e intenta de nuevo.');
+        setCode('');
         return;
       }
-
-      console.log('✅ Código verificado correctamente por Supabase');
-      toast.success('Código verificado correctamente');
-      setIsLoading(false);
+      toast.success('Código verificado');
       onVerify(result.session);
-
-    } catch (err: any) {
-      console.error('❌ Error inesperado al verificar:', err);
-      setError('Error al verificar el código. Intenta de nuevo.');
+    } catch {
+      setError('No se pudo verificar el código. Intenta de nuevo.');
+    } finally {
       setIsLoading(false);
     }
   };
 
-  // ── Reenviar código ──────────────────────────────────────────────
-
-  const handleResend = async () => {
+  const reenviar = async () => {
     setIsResending(true);
     setError('');
-    setCode(Array(CODE_LENGTH).fill(''));
-
+    setCode('');
     try {
-      let result;
-
-      if (isAdminLogin) {
-        // Para admin: OTP de 6 dígitos (signInWithOtp)
-        result = await sendLoginOTP(email);
-      } else {
-        // Para registro: reenviar confirmación de signup (8 dígitos)
-        result = await sendVerificationEmail(email);
-      }
-
+      const result = isAdminLogin ? await sendLoginOTP(email) : await sendVerificationEmail(email);
       if (result.success) {
-        toast.success('Código reenviado', {
-          description: 'Revisa tu correo electrónico (incluye carpeta de spam)',
-        });
+        toast.success('Código reenviado', { description: 'Revisa tu correo (también la carpeta de spam).' });
+        setEspera(ESPERA_REENVIO_S);
+      } else if (/rate limit/i.test(result.error ?? '')) {
+        setError('Pediste varios códigos seguidos. Espera unos minutos antes de pedir otro.');
+        setEspera(ESPERA_REENVIO_S);
       } else {
-        if (result.error?.includes('rate limit') || result.error?.includes('Rate limit')) {
-          setError(
-            'Has solicitado demasiados códigos. Por favor espera unos minutos antes de reintentar.'
-          );
-          toast.error('Límite excedido', {
-            description: 'Espera unos minutos antes de solicitar un nuevo código.',
-          });
-        } else {
-          setError(result.error || 'Error al enviar código');
-          toast.error('Error', {
-            description: result.error || 'No se pudo enviar el código',
-          });
-        }
+        setError(result.error || 'No se pudo reenviar el código.');
       }
-    } catch (err: any) {
-      console.error('❌ Error al reenviar código:', err);
-      setError('Error al reenviar código. Por favor intenta nuevamente.');
-      toast.error('Error', { description: 'No se pudo reenviar el código' });
+    } catch {
+      setError('No se pudo reenviar el código. Intenta de nuevo.');
     } finally {
       setIsResending(false);
-      inputRefs.current[0]?.focus();
     }
   };
-
-  const canSubmit = code.every(digit => digit !== '');
-
-  // ── RENDER ──────────────────────────────────────────────────────
 
   return (
     <div className="h-full bg-white flex flex-col">
-
-      {/* Header */}
-      <div className="flex items-center gap-4 px-6 py-4 border-b">
-        <button onClick={onBack} className="p-2 -ml-2 hover:bg-gray-100 rounded-full">
-          <ArrowLeft className="w-6 h-6 text-gray-700" />
+      <div className="flex items-center gap-3 px-4 py-3 border-b flex-shrink-0">
+        <button onClick={onBack} className="p-2 -ml-1 hover:bg-gray-100 rounded-full" aria-label="Volver">
+          <ArrowLeft className="w-5 h-5 text-gray-700" />
         </button>
-        <h1 className="text-gray-900">{title}</h1>
+        <h1 className="text-base font-semibold text-gray-900 truncate">{title}</h1>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto px-6 py-8">
-        <div className="max-w-md mx-auto space-y-6">
-
-          {/* Ícono */}
-          <div className="flex justify-center mb-6">
-            <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center">
-              <Mail className="w-10 h-10 text-blue-600" />
+      <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-6">
+        <div className="max-w-md mx-auto space-y-5">
+          <div className="flex flex-col items-center text-center gap-3">
+            <div className={`w-14 h-14 rounded-full flex items-center justify-center ${isAdminLogin ? 'bg-amber-100' : 'bg-blue-100'}`}>
+              {isAdminLogin
+                ? <ShieldCheck className="w-7 h-7 text-amber-700" aria-hidden />
+                : <Mail className="w-7 h-7 text-blue-600" aria-hidden />}
             </div>
-          </div>
-
-          {/* Título y descripción */}
-          <div className="text-center mb-8">
-            <h2 className="text-gray-900 mb-2">{subtitle}</h2>
-            <p className="text-gray-600 mb-4">
-              Enviamos un código a{' '}
-              <span className="text-blue-600 font-medium">{email}</span>
-            </p>
-
-            {/* Instrucciones */}
-            <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200 text-left">
-              <p className="text-sm font-medium text-blue-900 mb-2">
-                📧 Instrucciones importantes:
+            <div>
+              <h2 className="text-gray-900 font-semibold leading-snug">{subtitle}</h2>
+              <p className="text-sm text-gray-600 mt-1 break-words">
+                Lo enviamos a <span className="text-blue-700 font-medium">{email}</span>
               </p>
-              <ul className="text-sm text-blue-800 space-y-1.5">
-                <li>• Revisa tu bandeja de entrada</li>
-                <li>• Verifica la carpeta de <strong>Spam / Correo no deseado</strong></li>
-                <li>• El correo viene de <strong>Supabase</strong></li>
-                <li>• El código tiene <strong>{CODE_LENGTH} dígitos</strong></li>
-                <li>• El código expira en <strong>10 minutos</strong></li>
-              </ul>
             </div>
-
-            {/* Aviso especial para admin */}
-            {isAdminLogin && (
-              <div className="mt-3 px-4 py-2 bg-amber-50 rounded-lg border border-amber-200">
-                <p className="text-sm text-amber-800">
-                  🔐 Verificación de seguridad para administradores
-                </p>
-              </div>
-            )}
-
           </div>
 
-          {/* Error */}
+          <CodigoInput
+            length={CODE_LENGTH}
+            value={code}
+            onChange={v => { setCode(v); setError(''); }}
+            onComplete={v => verificar(v)}
+            error={!!error}
+            disabled={isLoading}
+          />
+
           {error && (
-            <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-lg">
-              <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+            <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg" role="alert">
+              <AlertCircle className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" aria-hidden />
               <p className="text-sm text-red-800">{error}</p>
             </div>
           )}
 
-          {/* Inputs del código */}
-          <div className="flex gap-2 justify-center mb-8">
-            {code.map((digit, index) => (
-              <input
-                key={index}
-                ref={el => { inputRefs.current[index] = el; }}
-                type="text"
-                inputMode="numeric"
-                maxLength={1}
-                value={digit}
-                onChange={e => handleChange(index, e.target.value)}
-                onKeyDown={e => handleKeyDown(index, e)}
-                onPaste={index === 0 ? handlePaste : undefined}
-                className={`
-                  w-12 h-14 text-center text-2xl font-semibold rounded-lg
-                  border-2 transition-all
-                  ${error
-                    ? 'border-red-500 bg-red-50'
-                    : digit
-                      ? 'border-blue-500 bg-blue-50'
-                      : 'border-gray-300 bg-white'
-                  }
-                  focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500
-                `}
-              />
-            ))}
-          </div>
-
-          {/* Botón verificar */}
           <Button
-            onClick={handleVerify}
-            disabled={!canSubmit || isLoading}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white disabled:bg-gray-300 disabled:text-gray-500"
-            size="lg"
+            onClick={() => verificar()}
+            disabled={code.length !== CODE_LENGTH || isLoading}
+            className="w-full h-12 bg-blue-600 hover:bg-blue-700 text-white disabled:bg-gray-300 disabled:text-gray-500"
           >
-            {isLoading ? 'Verificando...' : 'Verificar código'}
+            {isLoading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Verificando…</> : 'Verificar código'}
           </Button>
 
-          {/* Reenviar */}
-          <div className="text-center pt-4">
-            <p className="text-gray-600 mb-2">¿No recibiste el código?</p>
-            <button
-              onClick={handleResend}
-              disabled={isResending}
-              className="text-blue-600 hover:text-blue-700 font-medium disabled:text-gray-400 transition-colors"
-            >
-              {isResending ? 'Reenviando...' : 'Reenviar código'}
-            </button>
+          <div className="text-center text-sm">
+            <span className="text-gray-600">¿No te llegó? </span>
+            {espera > 0 ? (
+              <span className="text-gray-500">Puedes pedir otro en {espera} s</span>
+            ) : (
+              <button onClick={reenviar} disabled={isResending} className="text-blue-600 font-medium disabled:text-gray-400">
+                {isResending ? 'Reenviando…' : 'Reenviar código'}
+              </button>
+            )}
           </div>
 
+          <ul className="text-xs text-gray-500 bg-gray-50 rounded-lg p-3 space-y-1">
+            <li>• Revisa también <strong>Spam / Correo no deseado</strong>.</li>
+            <li>• El código tiene <strong>{CODE_LENGTH} dígitos</strong> y vence en <strong>10 minutos</strong>.</li>
+            <li>• Puedes pegarlo completo: se reparte solo en las casillas.</li>
+            {isAdminLogin && <li>• Es el segundo paso de seguridad del acceso de colaboradores.</li>}
+          </ul>
         </div>
       </div>
     </div>

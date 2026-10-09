@@ -79,12 +79,14 @@ function buildPopupHtml(incident: Incident): string {
 // ================================================================
 // COMPONENTE
 // ================================================================
-const KENNEDY_CENTER: [number, number] = [4.6173, -74.0703];
+// Sin incidentes: vista de Colombia (el personal atiende cualquier ciudad)
+const COLOMBIA_CENTER: [number, number] = [4.5709, -74.2973];
 
 export function OperatorMap({ incidents, selectedId, onSelectIncident }: OperatorMapProps) {
   const mapRef         = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
   const markersRef     = useRef<Map<string, any>>(new Map());
+  const encuadradoRef  = useRef(false);
 
   // ── Inicializar mapa ──────────────────────────────────────────
   useEffect(() => {
@@ -106,8 +108,8 @@ export function OperatorMap({ incidents, selectedId, onSelectIncident }: Operato
       if (!mapRef.current || mapInstanceRef.current) return;
 
       const map = L.map(mapRef.current, {
-        center:             KENNEDY_CENTER,
-        zoom:               14,
+        center:             COLOMBIA_CENTER,
+        zoom:               5,
         zoomControl:        true,
         attributionControl: true,
       });
@@ -122,7 +124,13 @@ export function OperatorMap({ incidents, selectedId, onSelectIncident }: Operato
 
     init();
 
+    // El mapa puede estar oculto (pestaña "Lista" en el celular): al
+    // mostrarse o cambiar de tamaño se recalcula para no quedar en gris.
+    const observador = new ResizeObserver(() => mapInstanceRef.current?.invalidateSize());
+    if (mapRef.current) observador.observe(mapRef.current);
+
     return () => {
+      observador.disconnect();
       markersRef.current.forEach(m => m.remove());
       markersRef.current.clear();
     };
@@ -132,6 +140,15 @@ export function OperatorMap({ incidents, selectedId, onSelectIncident }: Operato
   useEffect(() => {
     if (!mapInstanceRef.current) return;
     const map = mapInstanceRef.current;
+
+    // Primera vez con datos: encuadrar todos los incidentes
+    if (!encuadradoRef.current && incidents.length > 0) {
+      const puntos = incidents.filter(i => i.lat != null && i.lng != null).map(i => [i.lat, i.lng] as [number, number]);
+      if (puntos.length) {
+        map.fitBounds(L.latLngBounds(puntos), { padding: [40, 40], maxZoom: 15 });
+        encuadradoRef.current = true;
+      }
+    }
 
     // IDs de los incidentes actuales
     const currentIds = new Set(incidents.map(i => i.id));
@@ -199,8 +216,8 @@ export function OperatorMap({ incidents, selectedId, onSelectIncident }: Operato
   // ── Render ────────────────────────────────────────────────────
   return (
     <div
-      className="relative rounded-xl overflow-hidden border border-gray-200 shadow-sm"
-      style={{ height: 520, isolation: 'isolate', zIndex: 0 }}
+      className="relative rounded-xl overflow-hidden border border-gray-200 shadow-sm h-[calc(100dvh-15rem)] min-h-[320px] md:h-[520px]"
+      style={{ isolation: 'isolate', zIndex: 0 }}
     >
       <div ref={mapRef} className="w-full h-full" />
 

@@ -42,7 +42,7 @@ export function OperatorHeader({
   const roleLabel = operatorRole === 'auditor' ? 'Auditor' : 'Operador';
 
   return (
-    <header className="flex-shrink-0 bg-white border-b border-gray-200 px-6 py-3.5">
+    <header className="flex-shrink-0 bg-white border-b border-gray-200 px-3 sm:px-6 py-2.5 sm:py-3.5" style={{ paddingTop: 'max(0.625rem, env(safe-area-inset-top))' }}>
       <div className="flex items-center justify-between gap-4">
 
         {/* Logo + título */}
@@ -51,11 +51,11 @@ export function OperatorHeader({
             <div className="w-9 h-9 bg-blue-600 rounded-lg flex items-center justify-center flex-shrink-0">
               <Shield className="w-5 h-5 text-white" />
             </div>
-            <div className="hidden sm:block">
-              <h1 className="text-base font-semibold text-gray-900 leading-none">
-                Panel de Control
+            <div>
+              <h1 className="text-sm sm:text-base font-semibold text-gray-900 leading-none">
+                Panel de control
               </h1>
-              <p className="text-xs text-gray-400 mt-0.5">AlertaCiudadana</p>
+              <p className="text-xs text-gray-400 mt-0.5">{roleLabel} · Alerta Ciudadana</p>
             </div>
           </div>
         </div>
@@ -125,6 +125,21 @@ export function OperatorHeader({
           </DropdownMenu>
         </div>
       </div>
+
+      {/* Búsqueda en celular y tablet */}
+      {onSearch && (
+        <div className="md:hidden relative mt-2.5">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" aria-hidden />
+          <Input
+            type="search"
+            placeholder="Buscar por tipo, descripción o ID"
+            value={searchValue}
+            onChange={e => onSearch(e.target.value)}
+            className="pl-9 h-10 text-base"
+            aria-label="Buscar incidentes"
+          />
+        </div>
+      )}
     </header>
   );
 }

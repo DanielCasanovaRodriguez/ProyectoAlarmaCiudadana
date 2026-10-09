@@ -119,3 +119,12 @@ Las pruebas con inicio de sesión en el Supabase real necesitan credenciales, qu
 | `npm run test:unit` | ✅ 59/59 |
 | Producción: diagnóstico de Firebase OK; push de prueba enviado por FCM; pg_cron ejecutándose cada minuto (succeeded); 29 alertas conservadas | ✅ |
 | Navegador (400 px): mapa encuadrado en 1 km, contador y lista | ✅ |
+
+
+## Versión 1.7.0 (2026-10-08): perfiles de operador y administrador en el celular
+
+| Prueba | Resultado |
+|---|---|
+| `npm run test:db` (migraciones 1–16; mensaje del personal: llega solo al autor, ciudadanos no pueden enviarlo, longitud validada) | ✅ 94/94 |
+| `npm run test:unit` | ✅ 59/59 |
+| Navegador a 360 px: código de 8 casillas sin desbordar (328 px), filtra letras; filtros del operador en hoja inferior con listas visibles encima; detalle del incidente con unidad y mensaje reales; menú del administrador en cajón, encabezado de 56 px, sin desplazamiento horizontal | ✅ |
