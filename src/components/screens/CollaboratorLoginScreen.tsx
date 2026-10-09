@@ -9,6 +9,7 @@ import { getCurrentUserProfile } from '../../services/adminService';
 import { toast } from 'sonner';
 import { EmailVerificationScreen } from './EmailVerificationScreen';
 import { sendLoginOTP } from '../../utils/verificationCode';
+import { tiempoDesdeEnvio, VIGENCIA_REUTILIZABLE_MS } from '../../utils/envioCodigos';
 import { APP_VERSION } from '../../config/app';
 
 // ================================================================
@@ -32,6 +33,8 @@ export function CollaboratorLoginScreen({ onBack, onLoginSuccess }: Collaborator
   const [showPassword,           setShowPassword]           = useState(false);
   const [loading,                setLoading]                = useState(false);
   const [showEmailVerification,  setShowEmailVerification]  = useState(false);
+  const [avisoCodigo,            setAvisoCodigo]            = useState<string | undefined>();
+  const [esperaCodigo,           setEsperaCodigo]           = useState<number | undefined>();
   const [pendingAuth,            setPendingAuth]            = useState<{
     role:        string;
     accessToken: string;
@@ -89,13 +92,24 @@ export function CollaboratorLoginScreen({ onBack, onLoginSuccess }: Collaborator
       // Supabase al correo (verifyOtp crea la sesión definitiva).
       await cerrarSesion();
 
-      const otpResult = await sendLoginOTP(email);
-      if (!otpResult.success) {
-        toast.error('No se pudo enviar el código de verificación', {
-          description: otpResult.error,
-        });
-        setLoading(false);
-        return;
+      // Si ya se envió un código hace poco, se reutiliza (sigue vigente) en
+      // lugar de gastar otro correo; siempre se puede pedir uno nuevo.
+      const hace = tiempoDesdeEnvio(email);
+      if (hace != null && hace < VIGENCIA_REUTILIZABLE_MS) {
+        const min = Math.max(1, Math.round(hace / 60000));
+        setEsperaCodigo(undefined);
+        setAvisoCodigo(`Usa el código que te enviamos hace ${hace < 60000 ? 'menos de 1 minuto' : `${min} min`}. Si no lo encuentras, pide otro.`);
+      } else {
+        const otpResult = await sendLoginOTP(email);
+        if (!otpResult.success && !otpResult.esperaS) {
+          toast.error('No se pudo enviar el código de verificación', { description: otpResult.error });
+          setLoading(false);
+          return;
+        }
+        // El servidor pidió esperar: se entra igual a la pantalla del código
+        // (el último código recibido sigue sirviendo) con la cuenta regresiva.
+        setAvisoCodigo(otpResult.success ? undefined : otpResult.error);
+        setEsperaCodigo(otpResult.success ? undefined : otpResult.esperaS);
       }
 
       // ── PASO 4: Guardar auth pendiente y mostrar pantalla 2FA ────
@@ -182,6 +196,8 @@ export function CollaboratorLoginScreen({ onBack, onLoginSuccess }: Collaborator
         subtitle="Ingresa el código de 8 dígitos para acceder al panel"
         isAdminLogin={true}
         verificationType="email"
+        aviso={avisoCodigo}
+        esperaInicialS={esperaCodigo}
       />
     );
   }

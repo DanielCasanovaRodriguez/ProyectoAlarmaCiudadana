@@ -4,6 +4,7 @@ import { Button } from '../ui/button';
 import { CodigoInput } from '../auth/CodigoInput';
 import { verifyPasswordResetOTP, sendPasswordResetOTP } from '../../services/authService';
 import { toast } from 'sonner';
+import { ESPERA_REENVIO_S, esperaRestante } from '../../utils/envioCodigos';
 
 interface OTPVerificationScreenProps {
   /** Correo o número de cédula con el que se pidió la recuperación. */
@@ -15,14 +16,14 @@ interface OTPVerificationScreenProps {
 }
 
 const CODE_LENGTH = 8;
-const ESPERA_REENVIO_S = 60;
 
 /** Código para recuperar la contraseña (llega al correo de la cuenta). */
 export function OTPVerificationScreen({ email, onVerified, onBack }: OTPVerificationScreenProps) {
   const [code, setCode]               = useState('');
   const [error, setError]             = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
-  const [countdown, setCountdown]     = useState(ESPERA_REENVIO_S);
+  const [countdown, setCountdown]     = useState(() => esperaRestante(email) || ESPERA_REENVIO_S);
+  const [info, setInfo]               = useState('');
   const [isResending, setIsResending] = useState(false);
 
   useEffect(() => {
@@ -55,17 +56,21 @@ export function OTPVerificationScreen({ email, onVerified, onBack }: OTPVerifica
   const reenviar = async () => {
     if (countdown > 0 || isResending) return;
     setIsResending(true);
-    setCode('');
     setError('');
+    setInfo('');
     try {
       const result = await sendPasswordResetOTP(email);
       if (result.success) {
-        toast.success('Código reenviado', { description: 'Revisa tu correo (también la carpeta de spam).' });
+        setCode('');
+        toast.success('Código enviado', { description: 'Revisa tu correo (también la carpeta de spam).' });
+        setCountdown(ESPERA_REENVIO_S);
+      } else if (result.esperaS) {
+        setInfo(result.error ?? '');
+        setCountdown(result.esperaS);
       } else {
-        setError(result.error || 'No se pudo reenviar el código. Espera unos minutos e intenta de nuevo.');
+        setError(result.error || 'No se pudo enviar el código. Intenta de nuevo.');
       }
     } finally {
-      setCountdown(ESPERA_REENVIO_S);
       setIsResending(false);
     }
   };
@@ -104,6 +109,10 @@ export function OTPVerificationScreen({ email, onVerified, onBack }: OTPVerifica
             disabled={isVerifying}
           />
 
+          {info && !error && (
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-900" role="status">{info}</div>
+          )}
+
           {error && (
             <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg" role="alert">
               <AlertCircle className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" aria-hidden />
@@ -122,7 +131,7 @@ export function OTPVerificationScreen({ email, onVerified, onBack }: OTPVerifica
           <div className="text-center text-sm">
             <span className="text-gray-600">¿No te llegó? </span>
             {countdown > 0 ? (
-              <span className="text-gray-500">Puedes pedir otro en {countdown} s</span>
+              <span className="text-gray-500">Puedes pedir otro en <strong className="tabular-nums">{countdown} s</strong></span>
             ) : (
               <button onClick={reenviar} disabled={isResending} className="text-blue-600 font-medium disabled:text-gray-400">
                 {isResending ? 'Reenviando…' : 'Reenviar código'}
@@ -132,7 +141,7 @@ export function OTPVerificationScreen({ email, onVerified, onBack }: OTPVerifica
 
           <ul className="text-xs text-gray-500 bg-gray-50 rounded-lg p-3 space-y-1">
             <li>• Revisa también <strong>Spam / Correo no deseado</strong>.</li>
-            <li>• El código vence en <strong>10 minutos</strong>. Puedes pegarlo completo.</li>
+            <li>• Si pides otro, usa siempre el más reciente. Puedes pegarlo completo.</li>
           </ul>
         </div>
       </div>

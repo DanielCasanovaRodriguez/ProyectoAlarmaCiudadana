@@ -57,7 +57,7 @@
     "test:db": "node supabase/tests/migraciones.test.mjs",
     "android:sync": "vite build && cap sync android",
     "android:open": "cap open android",
-    "test:unit": "node --disable-warning=ExperimentalWarning tests/unit/errors.test.mts && node --disable-warning=ExperimentalWarning tests/unit/cedula.test.mts && node --disable-warning=ExperimentalWarning tests/unit/interventoria.test.mts"
+    "test:unit": "node --disable-warning=ExperimentalWarning tests/unit/errors.test.mts && node --disable-warning=ExperimentalWarning tests/unit/cedula.test.mts && node --disable-warning=ExperimentalWarning tests/unit/interventoria.test.mts && node --disable-warning=ExperimentalWarning tests/unit/envio.test.mts"
   },
   "description": "Alerta Ciudadana - cliente web y Android (Capacitor) sobre Supabase"
 }

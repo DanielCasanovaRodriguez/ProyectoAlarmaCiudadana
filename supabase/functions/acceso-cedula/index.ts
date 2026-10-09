@@ -110,7 +110,12 @@ Deno.serve(async (req) => {
   if (accion === 'recuperar') {
     const { error } = await publico.auth.resetPasswordForEmail(email);
     if (error && /rate limit|too many|security purposes/i.test(error.message)) {
-      return responder(429, { error: 'Ya enviamos un código hace poco. Espera un minuto e intenta de nuevo.' });
+      // Se devuelve la espera exacta que pide Supabase (la app muestra la cuenta regresiva)
+      const seg = /after (\d+) seconds?/i.exec(error.message)?.[1];
+      return responder(429, {
+        error: seg ? `Por seguridad, espera ${seg} s para pedir otro código.`
+                   : 'Se enviaron muchos correos en poco tiempo. Usa el último código que te llegó o intenta en unos minutos.',
+      });
     }
     if (error) console.error('recuperar', error.message);
     await demora();

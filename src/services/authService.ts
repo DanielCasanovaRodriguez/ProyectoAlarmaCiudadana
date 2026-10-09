@@ -1,5 +1,6 @@
 import { supabase } from '../utils/supabase/client';
 import { toUserMessage, toAppError } from '../utils/errors';
+import { interpretarErrorEnvio, registrarEnvio, type ResultadoEnvio } from '../utils/envioCodigos';
 import type { Database } from '../types/database.types';
 
 // ================================================================
@@ -215,23 +216,23 @@ export async function completeRegistration(_email: string) {
 // ================================================================
 // sendPasswordResetOTP
 // ================================================================
-export async function sendPasswordResetOTP(email: string) {
+export async function sendPasswordResetOTP(email: string): Promise<ResultadoEnvio> {
   try {
     if (!esCorreo(email)) {
       await recuperarConCedula(email);
+      registrarEnvio(email);
       return { success: true };
     }
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/reset-password`,
     });
-
-    if (error?.message.includes('rate limit')) {
-      return { success: false, error: 'Demasiados intentos. Espera unos minutos.' };
-    }
-
+    // Solo se informan los límites de envío: otros errores no deben revelar
+    // si el correo está registrado.
+    if (error && /rate limit|security purposes|seconds/i.test(error.message)) return interpretarErrorEnvio(error);
+    registrarEnvio(email);
     return { success: true };
-  } catch (error: any) {
-    return { success: false, error: toUserMessage(error) };
+  } catch (error) {
+    return interpretarErrorEnvio(error);
   }
 }
 
