@@ -14,6 +14,7 @@ export function AboutAppScreen({ onBack }: AboutAppScreenProps) {
     { icon: MapPin, color: 'bg-blue-100 text-blue-600',     titulo: 'Ubicación real',          texto: 'Cada alerta lleva la ubicación GPS de tu celular para que el personal sepa dónde ocurre.' },
     { icon: Users,  color: 'bg-green-100 text-green-600',   titulo: 'Avisos a 1 km',           texto: 'Las personas cercanas reciben un aviso con el tipo y el lugar de la alerta, sin tus datos.' },
     { icon: Phone,  color: 'bg-purple-100 text-purple-600', titulo: 'Tus contactos',           texto: 'Tras reportar, avisa a tus contactos de emergencia por SMS, WhatsApp o llamada con un toque.' },
+    { icon: Bell,   color: 'bg-blue-100 text-blue-600',     titulo: 'Mapa siempre al día',    texto: 'Cada alerta se ve máximo 1 hora; luego se cierra sola. Puedes mover el mapa a cualquier ciudad.' },
     { icon: Lock,   color: 'bg-amber-100 text-amber-700',   titulo: 'Una cédula, una cuenta',  texto: 'Cédula cifrada, límites de envío y bloqueo de cuentas con alertas falsas.' },
   ];
 

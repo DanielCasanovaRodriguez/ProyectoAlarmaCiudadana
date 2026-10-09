@@ -46,3 +46,12 @@ ubicación real (GPS) → alertas_cercanas(lat, lng) → ST_DWithin(geography, 5
 - Círculo de 5 km en el mapa; lista de alertas por distancia ("a 300 m · hace 10 min") con acceso al detalle.
 - Distancias truncadas (4 950 m → 4,9 km) para que nunca parezca fuera del radio.
 - Permiso de ubicación sin ventanas emergentes: pasos para activarlo en la misma pantalla.
+
+
+---
+
+## v1.6.0: radio de 1 km, mapa de todo el país y vigencia de 1 hora
+- **"Cerca de ti" = 1 km** (contador, lista y avisos). El mapa abre más cerca (encuadra el círculo de 1 km).
+- **El mapa muestra todas las alertas vigentes del área visible**, en cualquier ciudad: si alguien en Montería arrastra el mapa hasta Bogotá, ve las de Bogotá (se cargan solas al moverse, sin botón). No se cuentan como "cerca de ti". Si el mapa está demasiado alejado (> ~220 km por lado) se pide acercarlo.
+- **Vigencia de 1 hora:** `cerrar_alertas_vencidas()` corre **cada minuto con pg_cron** y cierra (no borra) las alertas con más de 1 hora: `status = resolved`, `cierre_automatico = true`, nota en el historial y aviso a quien reportó. Las consultas del mapa ya excluyen lo vencido aunque la tarea no haya corrido.
+- Al activarse se cerraron las 26 alertas antiguas **sin enviar avisos**; las 29 alertas siguen en la base de datos.

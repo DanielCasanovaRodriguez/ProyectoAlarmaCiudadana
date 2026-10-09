@@ -233,7 +233,7 @@ export function AlarmSheet({ isOpen, onClose, onCreateAlert, bloqueo }: AlarmShe
               <div className="flex gap-2">
                 <AlertTriangle className="w-4 h-4 text-yellow-600 flex-shrink-0 mt-0.5" />
                 <p className="text-xs text-yellow-800">
-                  <strong>Importante:</strong> reporta solo emergencias reales. Las alertas falsas suspenden tu cuenta
+                  <strong>Importante:</strong> tu alerta se verá en el mapa durante 1 hora. Reporta solo emergencias reales. Las alertas falsas suspenden tu cuenta
                   para reportar, y el uso indebido de la Línea 123 se sanciona con multa (Ley 1801 de 2016, art. 35 num. 7).
                 </p>
               </div>

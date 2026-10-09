@@ -221,8 +221,10 @@ export function AlertHistoryScreen({ alerts, onBack, onSelectAlert }: AlertHisto
                         </div>
 
                         {/* Badge de estado */}
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${getStatusColor(status)}`}>
-                          {getStatusLabel(status)}
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${
+                          alert.cierreAutomatico ? 'bg-gray-100 text-gray-600' : getStatusColor(status)}`}
+                          title={alert.cierreAutomatico ? 'Se cerró sola 1 hora después del reporte' : undefined}>
+                          {alert.cierreAutomatico ? 'Cerrada (1 h)' : getStatusLabel(status)}
                         </span>
                       </div>
 

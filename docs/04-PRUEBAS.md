@@ -109,3 +109,13 @@ Las pruebas con inicio de sesión en el Supabase real necesitan credenciales, qu
 | `npm run test:unit` | ✅ 59/59 |
 | Producción: desde Medellín 0 alertas; centro de Bogotá 22 (igual que una consulta PostGIS directa); distancia PostGIS 1 800 m vs Haversine 1 801 m | ✅ |
 | Navegador (400 px): círculo de 5 km, contador y lista por distancia, "Buscar alertas en esta zona" al alejarse, volver a mi ubicación, estado sin ubicación con vista de Colombia | ✅ |
+
+
+## Versión 1.6.0 (2026-10-08): notificaciones, 1 km y vigencia de 1 hora
+
+| Prueba | Resultado |
+|---|---|
+| `npm run test:db` (migraciones 1–15: 1 km por defecto, Bogotá visible explorando desde Montería sin contar como cercana, cierre a la hora sin borrar, historial con nota, permisos) | ✅ 93/93 |
+| `npm run test:unit` | ✅ 59/59 |
+| Producción: diagnóstico de Firebase OK; push de prueba enviado por FCM; pg_cron ejecutándose cada minuto (succeeded); 29 alertas conservadas | ✅ |
+| Navegador (400 px): mapa encuadrado en 1 km, contador y lista | ✅ |

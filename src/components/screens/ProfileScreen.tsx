@@ -12,6 +12,7 @@ import { isPushAvailable } from '../../platform';
 import { APP_VERSION } from '../../config/app';
 import { toUserMessage } from '../../utils/errors';
 import { toast } from 'sonner';
+import { probarNotificaciones } from '../../services/notificacionesService';
 
 interface ProfileScreenProps {
   user: {
@@ -95,6 +96,29 @@ export function ProfileScreen({
     setSaved(true);
     toast.success('Perfil guardado');
     setTimeout(() => setSaved(false), 2500);
+  };
+
+  const [probando, setProbando] = useState(false);
+  const probar = async () => {
+    setProbando(true);
+    try {
+      const r = await probarNotificaciones();
+      if (r.ok) {
+        toast.success('Prueba enviada', { description: 'En unos segundos te debe llegar una notificación. Prueba también con la app cerrada.' });
+      } else {
+        const textos: Record<string, string> = {
+          sin_permiso: 'Activa las notificaciones: Ajustes del teléfono → Apps → Alerta Ciudadana → Notificaciones.',
+          sin_dispositivo: 'No pudimos registrar este celular. Revisa tu conexión e intenta de nuevo.',
+          espera: 'Ya enviamos una prueba hace poco. Espera un minuto.',
+          sin_configurar: 'El servicio de notificaciones no está disponible en este momento.',
+        };
+        toast.error('No se pudo enviar la prueba', { description: textos[r.motivo] });
+      }
+    } catch (err) {
+      toast.error('No se pudo enviar la prueba', { description: toUserMessage(err) });
+    } finally {
+      setProbando(false);
+    }
   };
 
   const cambiarCercanas = async (v: boolean) => {
@@ -231,6 +255,21 @@ export function ProfileScreen({
             </div>
             <Switch checked={cercanas} disabled={guardandoCercanas || loading} onCheckedChange={cambiarCercanas} aria-label="Alertas cerca de mí" />
           </div>
+          {isPushAvailable() && (
+            <div className="px-4 pb-4">
+              <button
+                onClick={probar}
+                disabled={probando}
+                className="w-full flex items-center justify-center gap-2 rounded-xl border border-orange-200 bg-orange-50 text-orange-800 text-sm font-medium py-2.5 disabled:opacity-60"
+              >
+                {probando ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden /> : <Bell className="w-4 h-4" aria-hidden />}
+                {probando ? 'Enviando…' : 'Probar notificaciones'}
+              </button>
+              <p className="text-[11px] text-gray-400 mt-1.5 text-center">
+                Si no llega: permite las notificaciones y pon la batería de la app en "Sin restricciones".
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Tarjeta: Estado */}

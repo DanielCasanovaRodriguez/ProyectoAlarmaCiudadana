@@ -314,6 +314,8 @@ export const TERMINOS: DocumentoLegal = {
           'Las notificaciones dependen de servicios de terceros (Firebase) y de la configuración de tu celular.',
           'No garantizamos tiempos de atención: el personal atiende las alertas según su disponibilidad.',
           'Tus contactos de emergencia no se notifican de forma automática: tras enviar una alerta puedes avisarles con un toque por SMS o WhatsApp.',
+          'Cada alerta permanece activa y visible en el mapa máximo 1 hora desde que se reporta; después se cierra automáticamente y queda en tu historial. Si la emergencia continúa, repórtala de nuevo.',
+          'Cualquier persona con la app puede ver en el mapa las alertas activas de cualquier zona de Colombia; los avisos y el contador "cerca de ti" solo incluyen las que están a 1 km o menos.',
         ]} />
       ),
     },

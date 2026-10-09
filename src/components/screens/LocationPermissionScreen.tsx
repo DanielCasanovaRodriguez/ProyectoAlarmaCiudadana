@@ -49,13 +49,13 @@ export function LocationPermissionScreen({ onLocationGranted, onLocationDenied }
         </div>
         <h1 className="text-2xl font-bold text-center mb-3 text-gray-900">Activa tu ubicación</h1>
         <p className="text-gray-600 text-center max-w-sm leading-relaxed text-sm">
-          La usamos para mostrarte las alertas a 5 km de ti y para que tus reportes lleguen con el lugar exacto.
+          La usamos para mostrarte las alertas a 1 km de ti y para que tus reportes lleguen con el lugar exacto.
         </p>
 
         <div className="space-y-3 my-8 w-full max-w-sm">
           {[
             { icon: Navigation,    color: 'text-blue-500',   title: 'Lugar exacto',      desc: 'Quien atiende llega directo a donde estás' },
-            { icon: Shield,        color: 'text-green-500',  title: 'Alertas a 5 km',    desc: 'Solo lo que pasa cerca de ti, en tu ciudad' },
+            { icon: Shield,        color: 'text-green-500',  title: 'Alertas a 1 km',    desc: 'Lo que pasa cerca de ti, y el mapa de cualquier zona' },
             { icon: AlertTriangle, color: 'text-orange-500', title: 'Avisos cercanos',   desc: 'Te avisamos si ocurre algo a 1 km o menos' },
           ].map(({ icon: Icon, color, title, desc }) => (
             <div key={title} className="flex items-start gap-3 bg-gray-50 rounded-xl p-3">

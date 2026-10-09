@@ -811,9 +811,10 @@ await prueba('preparación: alertas en Medellín a 0,3 / 4,95 / 5,05 km', async 
   idsMed.cerca  = await nuevaAlertaEn(U.ana, alNorte(300),  MED.lng);
   idsMed.borde  = await nuevaAlertaEn(U.ana, alNorte(4950), MED.lng);
   idsMed.fuera  = await nuevaAlertaEn(U.ana, alNorte(5050), MED.lng);
+  await comoSistema(`update public.alerts set created_at = now() where id = any($1::uuid[])`, [Object.values(idsMed)]);
 });
 await prueba('desde Medellín: solo alertas ≤ 5 km, ordenadas por distancia (ninguna de Bogotá)', async () => {
-  const r = (await como(U.beto, `select id, distancia_m, lat from public.alertas_cercanas($1, $2)`, [MED.lat, MED.lng])).rows;
+  const r = (await como(U.beto, `select id, distancia_m, lat from public.alertas_cercanas($1, $2, 5000)`, [MED.lat, MED.lng])).rows;
   const ids = r.map(x => x.id);
   igual(ids.includes(idsMed.cerca), true, 'a 300 m');
   igual(ids.includes(idsMed.borde), true, 'a 4,95 km');
@@ -827,7 +828,7 @@ await prueba('el radio nunca supera 5 km aunque se pida más', async () => {
   igual(ids.includes(idsMed.fuera), false);
 });
 await prueba('desde Bogotá no aparecen las de Medellín', async () => {
-  const ids = (await como(U.beto, `select id from public.alertas_cercanas(4.62, -74.14)`)).rows.map(x => x.id);
+  const ids = (await como(U.beto, `select id from public.alertas_cercanas(4.62, -74.14, 5000)`)).rows.map(x => x.id);
   igual(Object.values(idsMed).some(id => ids.includes(id)), false);
 });
 await prueba('exploración manual: alertas del área visible; área enorme rechazada', async () => {
@@ -838,12 +839,12 @@ await prueba('exploración manual: alertas del área visible; área enorme recha
   await debeFallar(como('anon', `select * from public.alertas_cercanas($1, $2)`, [MED.lat, MED.lng]), '42501');
 });
 await prueba('no expone quién reportó ni evidencias ajenas', async () => {
-  const cols = (await como(U.beto, `select * from public.alertas_cercanas($1, $2)`, [MED.lat, MED.lng])).fields.map(f => f.name);
+  const cols = (await como(U.beto, `select * from public.alertas_cercanas($1, $2, 5000)`, [MED.lat, MED.lng])).fields.map(f => f.name);
   igual(cols.includes('user_id'), false);
-  const r = (await como(U.beto, `select media_urls, es_propia from public.alertas_cercanas($1, $2)`, [MED.lat, MED.lng])).rows;
+  const r = (await como(U.beto, `select media_urls, es_propia from public.alertas_cercanas($1, $2, 5000)`, [MED.lat, MED.lng])).rows;
   igual(r.every(x => x.es_propia === false && x.media_urls.length === 0), true);
 });
-await prueba('función anterior (web publicada): ciudadano ve solo ≤ 5 km de su última ubicación', async () => {
+await prueba('función anterior (web publicada): ciudadano ve solo ≤ 1 km de su última ubicación', async () => {
   await como(U.beto, `select public.actualizar_mi_ubicacion($1, $2, 10)`, [MED.lat, MED.lng]);
   const ids = (await como(U.beto, `select id from public.alertas_activas_publicas()`)).rows.map(x => x.id);
   igual(ids.includes(idsMed.cerca), true); igual(ids.includes(idsMed.fuera), false);
@@ -851,6 +852,52 @@ await prueba('función anterior (web publicada): ciudadano ve solo ≤ 5 km de s
   // el personal sigue viendo todas
   const todas = (await como(U.oper, `select id from public.alertas_activas_publicas()`)).rows.length;
   igual(todas > ids.length, true);
+});
+console.log('\n— Paso 14: radio de 1 km y vigencia de 1 hora');
+await prueba('por defecto "cerca de ti" es 1 km', async () => {
+  const ids = (await como(U.beto, `select id from public.alertas_cercanas($1, $2)`, [MED.lat, MED.lng])).rows.map(x => x.id);
+  igual(ids.includes(idsMed.cerca), true, 'a 300 m');
+  igual(ids.includes(idsMed.borde), false, 'a 4,95 km ya no es "cerca"');
+});
+await prueba('explorando el mapa se ven alertas lejanas (p. ej. Bogotá desde Montería) sin contarlas como cercanas', async () => {
+  const bog = await nuevaAlertaEn(U.ana, 4.65, -74.08);
+  await comoSistema(`update public.alerts set created_at = now() where id = $1`, [bog]);
+  const enArea = (await como(U.beto, `select id from public.alertas_en_area(4.5, -74.2, 4.8, -73.9)`)).rows.map(x => x.id);
+  igual(enArea.includes(bog), true);
+  const cercaMonteria = (await como(U.beto, `select id from public.alertas_cercanas(8.75, -75.88)`)).rows.map(x => x.id);
+  igual(cercaMonteria.includes(bog), false);
+  // área grande (≈ 220 km) permitida; país completo no
+  await como(U.beto, `select * from public.alertas_en_area(3.8, -75.0, 5.8, -73.0)`);
+  await debeFallar(como(U.beto, `select * from public.alertas_en_area(-4, -79, 12, -67)`), '22023');
+});
+await prueba('después de 1 hora la alerta sale del mapa y se cierra sola, sin borrarse', async () => {
+  const id = await nuevaAlertaEn(U.ana, MED.lat, MED.lng + 0.001);
+  await comoSistema(`update public.alerts set created_at = now() - interval '61 minutes' where id = $1`, [id]);
+  // fuera del mapa aunque la tarea programada no haya corrido
+  const visibles = (await como(U.beto, `select id from public.alertas_cercanas($1, $2)`, [MED.lat, MED.lng])).rows.map(x => x.id);
+  igual(visibles.includes(id), false);
+  const total = (await comoSistema(`select count(*)::int n from public.alerts`)).rows[0].n;
+  const cerradas = (await comoSistema(`select public.cerrar_alertas_vencidas() n`)).rows[0].n;
+  igual(cerradas >= 1, true);
+  const a = (await comoSistema(`select status, cierre_automatico, resolved_at is not null r from public.alerts where id = $1`, [id])).rows[0];
+  igual(a.status, 'resolved'); igual(a.cierre_automatico, true); igual(a.r, true);
+  igual((await comoSistema(`select count(*)::int n from public.alerts`)).rows[0].n, total, 'no se borra ninguna alerta');
+  const h = (await comoSistema(`select note from public.alert_status_history where alert_id = $1 and new_status = 'resolved'`, [id])).rows;
+  igual(h.length, 1); igual(/automático/.test(h[0].note), true);
+  // la autora la sigue viendo en su historial
+  igual((await como(U.ana, `select count(*)::int n from public.alerts where id = $1`, [id])).rows[0].n, 1);
+});
+await prueba('probar notificaciones: sin dispositivo avisa; con dispositivo, 1 por minuto', async () => {
+  const sinDisp = (await como(U.audi, `select public.probar_mis_notificaciones() r`)).rows[0].r;
+  igual(sinDisp.ok, false); igual(sinDisp.motivo, 'sin_dispositivo');
+  await como(U.audi, `select public.registrar_dispositivo($1, 'android')`, ['token-de-prueba-auditor-0123456789abcdef']);
+  // sin pg_net en las pruebas: queda "sin configurar", pero nunca falla
+  const r = (await como(U.audi, `select public.probar_mis_notificaciones() r`)).rows[0].r;
+  igual(typeof r.ok, 'boolean');
+  await debeFallar(como('anon', `select public.probar_mis_notificaciones()`), '42501');
+});
+await prueba('la tarea de cierre no se puede llamar desde la app', async () => {
+  await debeFallar(como(U.ana, `select public.cerrar_alertas_vencidas()`), '42501');
 });
 await prueba('ya no se pueden subir fotos de cédula', async () => {
   await comoSistema(`insert into storage.buckets (id, name) values ('documentos-identidad', 'documentos-identidad') on conflict do nothing`);

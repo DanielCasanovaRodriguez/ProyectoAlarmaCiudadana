@@ -118,13 +118,13 @@ export async function updateAlertMediaUrls(
 }
 
 // ================================================================
-// Proximidad real (paso 13): lo automático es lo que está a ≤ 5 km
+// Proximidad real (pasos 13-14): "cerca de ti" es lo que está a ≤ 1 km
 // ================================================================
 
-/** Radio de las alertas "cerca de ti" (el servidor nunca devuelve más). */
-export const RADIO_CERCANIA_M = 5000;
+/** Radio de las alertas "cerca de ti" (1 km). */
+export const RADIO_CERCANIA_M = 1000;
 
-/** Alertas activas a ≤ 5 km de un punto, ordenadas por distancia (la calcula la BD). */
+/** Alertas activas a ≤ 1 km de un punto, ordenadas por distancia (la calcula la BD). */
 export async function getAlertasCercanas(lat: number, lng: number): Promise<AlertaCercanaRow[]> {
   const { data, error } = await supabase.rpc('alertas_cercanas', { p_lat: lat, p_lng: lng, p_radio_m: RADIO_CERCANIA_M });
   if (error) throw toAppError(error, 'No se pudieron cargar las alertas cercanas.');
@@ -143,7 +143,7 @@ export async function getAlertasEnArea(a: AreaMapa): Promise<AlertaCercanaRow[]>
 }
 
 // ================================================================
-// CU-010 — Alertas activas (anterior; el servidor ya la limita a 5 km)
+// CU-010 — Alertas activas (anterior; el servidor ya la limita a 1 km)
 // ================================================================
 
 export async function getActiveAlerts(): Promise<Alert[]> {

@@ -82,6 +82,8 @@ export interface Database {
           lng:                  number;
           status:               AlertStatus;
           anonimo:              boolean;
+          marcada_falsa?:       boolean;
+          cierre_automatico?:   boolean;
           operador_asignado_id: string | null;
           ack_at:               string | null;
           resolved_at:          string | null;
@@ -440,7 +442,7 @@ export interface Database {
     Views:          Record<string, never>;
     // RPC definidas en supabase/migrations/20260925000001_funciones_negocio.sql
     Functions: {
-      // Paso 13: proximidad real (≤ 5 km) y exploración del área visible
+      // Pasos 13-14: proximidad real (≤ 1 km) y exploración del área visible
       alertas_cercanas: {
         Args: { p_lat: number; p_lng: number; p_radio_m?: number };
         Returns: AlertaCercanaRow[];
@@ -503,6 +505,7 @@ export interface Database {
       es_colaborador: { Args: Record<string, never>; Returns: boolean };
       // Paso 10-11: autorización de datos y solicitudes del titular
       aceptar_politica: { Args: { p_version: string }; Returns: undefined };
+      probar_mis_notificaciones: { Args: Record<string, never>; Returns: unknown };
       crear_solicitud_titular: { Args: { p_tipo: string; p_mensaje: string }; Returns: { id: string; fecha_limite: string }[] };
       admin_responder_solicitud: { Args: { p_id: string; p_estado: string; p_respuesta: string }; Returns: undefined };
       admin_listar_solicitudes: {

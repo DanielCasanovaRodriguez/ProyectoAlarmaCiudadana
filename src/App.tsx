@@ -50,7 +50,7 @@ import {
 } from './services/alertService.ts';
 import { completeRegistration, sendPasswordResetOTP, cerrarSesion } from './services/authService.ts';
 import { uploadMultipleFiles } from './services/mediaService';
-import { getCurrentLocation, hasLocationPermission, initNativeShell, registerForPush, unregisterPush, watchLocation, iniciarEscuchaNotificaciones, isNative } from './platform';
+import { getCurrentLocation, hasLocationPermission, initNativeShell, registerForPush, unregisterPush, watchLocation, iniciarEscuchaNotificaciones, isNative, isPushAvailable } from './platform';
 import { App as CapApp } from '@capacitor/app';
 import { supabase } from './utils/supabase/client';
 
@@ -68,6 +68,8 @@ export interface Alert {
   status?:      'open' | 'ack' | 'resolved';
   /** Distancia en metros a la ubicación del usuario (alertas cercanas). */
   distanciaM?:  number | null;
+  /** Cerrada por la regla de 1 hora (no por el personal). */
+  cierreAutomatico?: boolean;
 }
 
 export type Screen =
@@ -149,6 +151,7 @@ function convertDbAlert(dbAlert: any): Alert {
     mediaUrls:   dbAlert.media_urls ?? [],
     status:      dbAlert.status,
     distanciaM:  dbAlert.distancia_m ?? null,
+    cierreAutomatico: !!dbAlert.cierre_automatico,
   };
 }
 
@@ -225,7 +228,7 @@ export default function App() {
     return () => clearInterval(id);
   }, [appState.auth.isLoggedIn, appState.currentScreen]);
 
-  // ── E5: Alertas a ≤ 5 km de la ubicación REAL del usuario ────────
+  // ── E5: Alertas a ≤ 1 km de la ubicación REAL del usuario ────────
   // La BD filtra por distancia (PostGIS, paso 13): nunca se descarga el
   // país entero. Se vuelve a consultar cada 15 s y cuando la persona se
   // mueve más de ~200 m. Sin ubicación no hay "alertas cerca de ti".
@@ -252,7 +255,8 @@ export default function App() {
         if (cancelado) return;
         setAppState(prev => {
           // Aviso dentro de la app si aparece una alerta nueva de otra persona a ≤ 1 km
-          if (idsConocidos) {
+          // (con push activo, el aviso llega como notificación: no se duplica)
+          if (idsConocidos && !isPushAvailable()) {
             for (const a of cercanas) {
               if (idsConocidos.has(a.id) || a.es_propia || (a.distancia_m ?? Infinity) > 1000) continue;
               toast.warning(`Alerta cercana: ${getAlertTypeLabel(a.type_code)}`, {

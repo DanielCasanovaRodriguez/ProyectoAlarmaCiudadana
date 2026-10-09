@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { MapView, type AreaVisible } from '../MapView';
 import { AlarmButton } from '../AlarmButton';
 import { AlarmSheet } from '../AlarmSheet';
@@ -11,7 +11,6 @@ import { getAlertasEnArea, getAlertTypeLabel, getAlertTypeColor, RADIO_CERCANIA_
 import { formatearDistancia, distanciaM } from '../../services/proximityService';
 import { useOnlineStatus } from '../../platform/network';
 import { toUserMessage } from '../../utils/errors';
-import { toast } from 'sonner';
 
 // ================================================================
 // TIPOS
@@ -19,7 +18,7 @@ import { toast } from 'sonner';
 
 interface MainMapScreenProps {
   alerts:              Alert[];       // alertas propias (para el contador personal)
-  areaAlerts:          Alert[];       // alertas activas a ≤ 5 km de la ubicación real
+  areaAlerts:          Alert[];       // alertas activas a ≤ 1 km de la ubicación real
   ownActiveAlertIds:   string[];      // IDs propios activos (para distinción visual)
   userLocation:        { lat: number; lng: number } | null;
   onCreateAlert:       (type: Alert['type'], description: string, files: File[]) => Promise<void>;
@@ -31,12 +30,6 @@ interface MainMapScreenProps {
   /** Pide de nuevo el permiso de ubicación. */
   onActivarUbicacion?: () => void;
   bloqueoReporte?:     { mensaje: string; onVerificar?: () => void } | null;
-}
-
-/** Zona que la persona exploró a mano (fuera de su radio de cercanía). */
-interface Exploracion {
-  alerts:   Alert[];
-  cargando: boolean;
 }
 
 const KM = RADIO_CERCANIA_M / 1000;
@@ -69,68 +62,88 @@ export function MainMapScreen({
   const [isAlarmSheetOpen, setIsAlarmSheetOpen] = useState(false);
   const [isMenuOpen,       setIsMenuOpen]       = useState(false);
   const [listaAbierta,     setListaAbierta]     = useState(false);
-  // Exploración manual: el mapa se movió lejos de la persona
-  const [areaMovida,  setAreaMovida]  = useState<AreaVisible | null>(null);
-  const [exploracion, setExploracion] = useState<Exploracion | null>(null);
+  // El mapa muestra TODAS las alertas vigentes del área visible (cualquier
+  // ciudad a la que la persona se desplace). El contador y la lista solo
+  // cuentan las que están a ≤ 1 km de su ubicación real.
+  const [areaVisible, setAreaVisible] = useState<AreaVisible | null>(null);
+  const [centroMapa,  setCentroMapa]  = useState<{ lat: number; lng: number } | null>(null);
+  const [delArea,     setDelArea]     = useState<Alert[]>([]);
+  const [cargandoArea, setCargandoArea] = useState(false);
+  const [areaMuyGrande, setAreaMuyGrande] = useState(false);
   const [recentrar,   setRecentrar]   = useState(0);
   const online = useOnlineStatus();
 
   const ownActiveAlerts = alerts.filter(a => a.status === 'open' || a.status === 'ack');
-  const explorando = exploracion !== null;
-  const visibles = explorando ? exploracion.alerts : areaAlerts;
+  const explorando = !!centroMapa && (!userLocation || distanciaM(userLocation, centroMapa) > RADIO_CERCANIA_M * 1.5);
 
   const handleCreateAlert = async (type: Alert['type'], description: string, files: File[]) => {
     setIsAlarmSheetOpen(false);
     await onCreateAlert(type, description, files);
   };
 
-  // La persona movió o acercó el mapa: si se alejó de su zona, se ofrece buscar allí
-  const alMoverMapa = (area: AreaVisible, centro: { lat: number; lng: number }) => {
-    const lejos = !userLocation || distanciaM(userLocation, centro) > RADIO_CERCANIA_M * 0.6;
-    setAreaMovida(lejos || explorando ? area : null);
+  const alCambiarArea = (area: AreaVisible, centro: { lat: number; lng: number }) => {
+    setAreaVisible(area);
+    setCentroMapa(centro);
   };
 
-  const buscarEnZona = async () => {
-    if (!areaMovida) return;
-    setExploracion(prev => ({ alerts: prev?.alerts ?? [], cargando: true }));
-    try {
-      const filas = await getAlertasEnArea(areaMovida);
-      setExploracion({
-        cargando: false,
-        alerts: filas.map(f => ({
+  // Carga del área visible: al moverse (con espera breve) y cada 20 s
+  const ubicacionRef = useRef(userLocation);
+  ubicacionRef.current = userLocation;
+  useEffect(() => {
+    if (!areaVisible) return;
+    if (areaVisible.norte - areaVisible.sur > 2 || areaVisible.este - areaVisible.oeste > 2) {
+      setAreaMuyGrande(true);
+      setDelArea([]);
+      return;
+    }
+    setAreaMuyGrande(false);
+    let cancelado = false;
+    const cargar = async () => {
+      setCargandoArea(true);
+      try {
+        const filas = await getAlertasEnArea(areaVisible);
+        if (cancelado) return;
+        const yo = ubicacionRef.current;
+        setDelArea(filas.map(f => ({
           id: f.id, type: f.type_code as Alert['type'], location: { lat: f.lat, lng: f.lng },
           timestamp: new Date(f.created_at), description: f.description ?? undefined,
           mediaUrls: f.media_urls, status: f.status,
-          distanciaM: userLocation ? distanciaM(userLocation, { lat: f.lat, lng: f.lng }) : null,
-        })),
-      });
-      setAreaMovida(null);
-      if (filas.length === 0) toast.info('Sin alertas activas en esta zona');
-    } catch (err) {
-      setExploracion(prev => (prev && prev.alerts.length ? { ...prev, cargando: false } : null));
-      toast.error(toUserMessage(err, 'No se pudieron cargar las alertas de esta zona.'));
-    }
-  };
+          distanciaM: yo ? distanciaM(yo, { lat: f.lat, lng: f.lng }) : null,
+        })));
+      } catch (err) {
+        if (!cancelado) console.warn('Alertas del área:', toUserMessage(err));
+      } finally {
+        if (!cancelado) setCargandoArea(false);
+      }
+    };
+    const espera = setTimeout(cargar, 350);
+    const intervalo = setInterval(cargar, 20_000);
+    return () => { cancelado = true; clearTimeout(espera); clearInterval(intervalo); };
+  }, [areaVisible]);
 
-  const volverAMiUbicacion = () => {
-    setExploracion(null);
-    setAreaMovida(null);
-    setRecentrar(n => n + 1);
-  };
+  // En el mapa: las cercanas (con distancia exacta del servidor) + las del área
+  const enMapa = (() => {
+    const porId = new Map<string, Alert>();
+    for (const a of delArea) porId.set(a.id, a);
+    for (const a of areaAlerts) porId.set(a.id, a);
+    return [...porId.values()];
+  })();
+
+  const volverAMiUbicacion = () => setRecentrar(n => n + 1);
 
   // Lista ordenada por distancia (lo más cercano primero)
-  const lista = [...visibles].sort((a, b) => (a.distanciaM ?? Infinity) - (b.distanciaM ?? Infinity));
+  const lista = [...areaAlerts].sort((a, b) => (a.distanciaM ?? Infinity) - (b.distanciaM ?? Infinity));
 
   return (
     <div className="h-full w-full relative bg-gray-100">
 
       {/* ── Mapa ─────────────────────────────────────────────────── */}
       <MapView
-        alerts={visibles}
+        alerts={enMapa}
         ownActiveAlertIds={ownActiveAlertIds}
         userLocation={userLocation}
         radioM={RADIO_CERCANIA_M}
-        onMovidoPorUsuario={alMoverMapa}
+        onAreaCambiada={alCambiarArea}
         recentrar={recentrar}
       />
 
@@ -142,7 +155,10 @@ export function MainMapScreen({
               <span className="text-sm text-gray-800 truncate">Ubicación desactivada</span></>
           ) : explorando ? (
             <><Search className="w-4 h-4 text-blue-600 flex-shrink-0" aria-hidden />
-              <span className="text-sm text-gray-800 truncate">Explorando otra zona</span></>
+              <span className="text-sm text-gray-800 truncate">
+                Explorando otra zona{!areaMuyGrande ? ` · ${delArea.length} alerta${delArea.length === 1 ? '' : 's'}` : ''}
+              </span>
+              {cargandoArea && <Loader2 className="w-3.5 h-3.5 text-gray-400 animate-spin flex-shrink-0" aria-hidden />}</>
           ) : (
             <><span className="w-2 h-2 rounded-full bg-green-500 animate-pulse flex-shrink-0" aria-hidden />
               <span className="text-sm text-gray-800 truncate">Alertas a {KM} km de ti</span></>
@@ -155,15 +171,11 @@ export function MainMapScreen({
         )}
       </div>
 
-      {/* ── Buscar en la zona explorada (patrón de los mapas conocidos) ── */}
-      {areaMovida && (
-        <button
-          onClick={buscarEnZona}
-          className="absolute top-16 left-1/2 -translate-x-1/2 z-20 bg-white text-blue-700 font-semibold text-sm rounded-full shadow-lg border border-blue-200 px-4 py-2.5 flex items-center gap-2 hover:bg-blue-50 whitespace-nowrap"
-        >
-          {exploracion?.cargando ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden /> : <Search className="w-4 h-4" aria-hidden />}
-          Buscar alertas en esta zona
-        </button>
+      {/* ── Mapa muy alejado: se pide acercar ────────────────────── */}
+      {areaMuyGrande && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 bg-white text-gray-800 text-sm rounded-full shadow-lg border border-gray-200 px-4 py-2 flex items-center gap-2 whitespace-nowrap">
+          <Search className="w-4 h-4 text-blue-600" aria-hidden /> Acerca el mapa para ver las alertas
+        </div>
       )}
 
       {/* ── Menú (arriba a la derecha) ───────────────────────────── */}
@@ -247,12 +259,12 @@ export function MainMapScreen({
               </div>
               <div>
                 <p className="text-[11px] text-gray-500 leading-none mb-0.5">
-                  {explorando ? 'Alertas activas en esta zona' : `Alertas activas a ${KM} km de ti`}
+                  Alertas activas a {KM} km de ti
                 </p>
-                <p className="text-xl font-bold text-gray-900 leading-none">{visibles.length}</p>
+                <p className="text-xl font-bold text-gray-900 leading-none">{areaAlerts.length}</p>
               </div>
             </div>
-            {visibles.length > 0 && (
+            {areaAlerts.length > 0 && (
               <span className="inline-flex items-center gap-1 text-xs text-blue-600 font-medium">Ver lista <ChevronUp className="w-4 h-4" aria-hidden /></span>
             )}
           </button>
@@ -280,7 +292,7 @@ export function MainMapScreen({
             <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b">
               <div>
                 <p className="text-base font-semibold text-gray-900">
-                  {explorando ? 'Alertas en esta zona' : `Alertas a ${KM} km de ti`}
+                  Alertas a {KM} km de ti
                 </p>
                 <p className="text-xs text-gray-500">{lista.length} activa{lista.length === 1 ? '' : 's'} · las más cercanas primero</p>
               </div>
@@ -291,7 +303,7 @@ export function MainMapScreen({
             <div className="overflow-y-auto divide-y divide-gray-100">
               {lista.length === 0 && (
                 <p className="text-sm text-gray-500 text-center py-8 px-6">
-                  No hay alertas activas {explorando ? 'en esta zona' : `a ${KM} km de ti`}. Si algo pasa, usa el botón rojo.
+                  No hay alertas activas a {KM} km de ti. Si algo pasa, usa el botón rojo.
                 </p>
               )}
               {lista.map(a => (

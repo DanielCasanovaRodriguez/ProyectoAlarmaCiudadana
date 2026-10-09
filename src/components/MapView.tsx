@@ -17,8 +17,8 @@ interface MapViewProps {
   center?:           { lat: number; lng: number } | null;
   /** Radio de cercanía a dibujar alrededor del usuario (m). */
   radioM?:           number;
-  /** La PERSONA movió o acercó el mapa (no los movimientos automáticos). */
-  onMovidoPorUsuario?: (area: AreaVisible, centro: { lat: number; lng: number }) => void;
+  /** El área visible cambió (porUsuario = la persona arrastró o hizo zoom). */
+  onAreaCambiada?: (area: AreaVisible, centro: { lat: number; lng: number }, porUsuario: boolean) => void;
   /** Cambiar este número vuelve a centrar el mapa en el usuario y su radio. */
   recentrar?:        number;
 }
@@ -151,14 +151,14 @@ function formatTimeAgo(timestamp: Date): string {
 // ================================================================
 
 export function MapView({
-  alerts, ownActiveAlertIds, userLocation, center: centroFijo, radioM, onMovidoPorUsuario, recentrar,
+  alerts, ownActiveAlertIds, userLocation, center: centroFijo, radioM, onAreaCambiada, recentrar,
 }: MapViewProps) {
   const centradoEnUsuarioRef = useRef(false);
   const circuloRef     = useRef<any>(null);
   // Los movimientos que hace el código (centrar, encuadrar) no cuentan como exploración
   const automaticoRef  = useRef(false);
-  const onMovidoRef    = useRef(onMovidoPorUsuario);
-  onMovidoRef.current  = onMovidoPorUsuario;
+  const onAreaRef      = useRef(onAreaCambiada);
+  onAreaRef.current    = onAreaCambiada;
   const mapRef         = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
   const markersRef     = useRef<any[]>([]);
@@ -202,15 +202,20 @@ export function MapView({
       });
       L.control.zoom({ position: 'topright', zoomInTitle: 'Acercar', zoomOutTitle: 'Alejar' }).addTo(map);
 
-      map.on('moveend', () => {
-        if (automaticoRef.current) { automaticoRef.current = false; return; }
+      const informarArea = () => {
+        const porUsuario = !automaticoRef.current;
+        automaticoRef.current = false;
         const b = map.getBounds();
         const c = map.getCenter();
-        onMovidoRef.current?.(
+        onAreaRef.current?.(
           { sur: b.getSouth(), oeste: b.getWest(), norte: b.getNorth(), este: b.getEast() },
           { lat: c.lat, lng: c.lng },
+          porUsuario,
         );
-      });
+      };
+      map.on('moveend', informarArea);
+      // Área inicial (las alertas de lo que se ve, aunque no estén "cerca")
+      setTimeout(informarArea, 0);
 
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap contributors',
@@ -299,7 +304,7 @@ export function MapView({
     // Si el mapa ya estaba ahí no hay 'moveend': se libera la marca igual
     setTimeout(() => { automaticoRef.current = false; }, 1200);
     if (circuloRef.current) {
-      map.fitBounds(circuloRef.current.getBounds(), { padding: [12, 12], animate: true });
+      map.fitBounds(circuloRef.current.getBounds(), { paddingTopLeft: [16, 64], paddingBottomRight: [16, 24], animate: true });
     } else {
       map.setView([userLocation.lat, userLocation.lng], 15);
     }
