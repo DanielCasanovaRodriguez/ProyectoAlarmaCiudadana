@@ -162,7 +162,7 @@ export function AdminLoginScreen({ onLoginSuccess }: AdminLoginScreenProps) {
 
         {/* Footer */}
         <p className="text-center text-xs text-gray-500 mt-6">
-          AlertaCiudadana © 2025 • Conforme a la Ley 1581/2012
+          Alerta Ciudadana © {new Date().getFullYear()} • Ley 1581 de 2012
         </p>
       </div>
     </div>

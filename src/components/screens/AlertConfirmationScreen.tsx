@@ -3,6 +3,8 @@ import { Alert } from '../../App';
 import { Button } from '../ui/button';
 import { EvidenceImage } from '../EvidenceImage';
 import { useSignedMediaUrls } from '../../hooks/useSignedMediaUrls';
+import { AvisarContactos } from '../AvisarContactos';
+import { LINEA_EMERGENCIAS } from '../../config/colombia';
 import {
   CheckCircle, MapPin, Clock,
   AlertTriangle, Car, Shield, Flame, Users,
@@ -13,6 +15,8 @@ interface AlertConfirmationScreenProps {
   alert:         Alert;
   onBackToMap:   () => void;
   onViewHistory: () => void;
+  nombreUsuario?: string;
+  onConfigurarContactos?: () => void;
 }
 
 const alertConfig: Record<string, {
@@ -45,6 +49,8 @@ export function AlertConfirmationScreen({
   alert,
   onBackToMap,
   onViewHistory,
+  nombreUsuario = '',
+  onConfigurarContactos,
 }: AlertConfirmationScreenProps) {
   const config = alertConfig[alert.type] ?? defaultConfig;
   const Icon   = config.icon;
@@ -161,6 +167,14 @@ export function AlertConfirmationScreen({
         </div>
       </div>
 
+      <AvisarContactos
+        nombreUsuario={nombreUsuario}
+        tipoAlerta={config.label}
+        lat={alert.location.lat}
+        lng={alert.location.lng}
+        onConfigurar={onConfigurarContactos}
+      />
+
       {/* Botones */}
       <div className="space-y-3 w-full max-w-sm">
         <Button
@@ -180,13 +194,12 @@ export function AlertConfirmationScreen({
         </Button>
       </div>
 
-      {/* Llamar al 911 */}
+      {/* Línea Única de Emergencias de Colombia */}
       <div className="mt-6 text-center">
-        <p className="text-xs text-gray-400 mb-2">¿Necesitas ayuda inmediata?</p>
-        <a href="tel:911">
-          <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50">
-            Llamar 911
-          </Button>
+        <p className="text-xs text-gray-500 mb-2">¿Hay una vida en riesgo? Esta app no reemplaza a las autoridades.</p>
+        <a href={`tel:${LINEA_EMERGENCIAS}`}
+          className="inline-flex items-center justify-center h-10 px-5 rounded-md border border-red-200 text-red-600 font-semibold hover:bg-red-50">
+          Llamar a la Línea {LINEA_EMERGENCIAS}
         </a>
       </div>
     </div>

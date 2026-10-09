@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Bell, Shield, Info, LogOut, Phone, Loader2, CheckCircle, ChevronRight, IdCard, AlertTriangle, Clock } from 'lucide-react';
+import { ArrowLeft, Bell, Shield, Info, LogOut, Phone, Loader2, CheckCircle, ChevronRight, IdCard, AlertTriangle, Clock, Scale, FileText } from 'lucide-react';
 import { Input }   from '../ui/input';
 import { Switch }  from '../ui/switch';
 import { getUserProfile, updateUserProfile } from '../../services/profileService';
@@ -12,6 +12,7 @@ import { isPushAvailable } from '../../platform';
 import { APP_VERSION } from '../../config/app';
 import { toUserMessage } from '../../utils/errors';
 import { toast } from 'sonner';
+import { probarNotificaciones } from '../../services/notificacionesService';
 
 interface ProfileScreenProps {
   user: {
@@ -24,6 +25,8 @@ interface ProfileScreenProps {
   onNavigateToEmergencyContact: () => void;
   onNavigateToAbout:            () => void;
   onNavigateToPrivacy:          () => void;
+  onNavigateToTerms?:           () => void;
+  onNavigateToDerechos?:        () => void;
   onLogout?:                    () => void;
   /** Verificación de identidad (undefined = cargando). */
   identidad?:                   MiIdentidad | null;
@@ -37,6 +40,8 @@ export function ProfileScreen({
   onNavigateToEmergencyContact,
   onNavigateToAbout,
   onNavigateToPrivacy,
+  onNavigateToTerms,
+  onNavigateToDerechos,
   onLogout,
   identidad,
   onVerificarIdentidad,
@@ -93,6 +98,29 @@ export function ProfileScreen({
     setTimeout(() => setSaved(false), 2500);
   };
 
+  const [probando, setProbando] = useState(false);
+  const probar = async () => {
+    setProbando(true);
+    try {
+      const r = await probarNotificaciones();
+      if (r.ok) {
+        toast.success('Prueba enviada', { description: 'En unos segundos te debe llegar una notificación. Prueba también con la app cerrada.' });
+      } else {
+        const textos: Record<string, string> = {
+          sin_permiso: 'Activa las notificaciones: Ajustes del teléfono → Apps → Alerta Ciudadana → Notificaciones.',
+          sin_dispositivo: 'No pudimos registrar este celular. Revisa tu conexión e intenta de nuevo.',
+          espera: 'Ya enviamos una prueba hace poco. Espera un minuto.',
+          sin_configurar: 'El servicio de notificaciones no está disponible en este momento.',
+        };
+        toast.error('No se pudo enviar la prueba', { description: textos[r.motivo] });
+      }
+    } catch (err) {
+      toast.error('No se pudo enviar la prueba', { description: toUserMessage(err) });
+    } finally {
+      setProbando(false);
+    }
+  };
+
   const cambiarCercanas = async (v: boolean) => {
     setCercanas(v);
     setGuardandoCercanas(true);
@@ -113,11 +141,10 @@ export function ProfileScreen({
     : '?';
 
   const tarjetaIdentidad = (() => {
-    if (identidad === undefined) return { icono: Loader2, color: 'bg-gray-100 text-gray-500', titulo: 'Consultando verificación…', texto: '', accion: false, girar: true };
-    if (identidad === null) return { icono: AlertTriangle, color: 'bg-amber-100 text-amber-700', titulo: 'Identidad sin verificar', texto: 'Verifica tu cédula para poder reportar alertas.', accion: true };
-    if (identidad.estado === 'verificada') return { icono: CheckCircle, color: 'bg-green-100 text-green-700', titulo: 'Identidad verificada', texto: `Cédula terminada en ${identidad.ultimos_digitos}`, accion: false };
-    if (identidad.estado === 'pendiente') return { icono: Clock, color: 'bg-blue-100 text-blue-700', titulo: 'Verificación en revisión', texto: `Cédula terminada en ${identidad.ultimos_digitos}. Ya puedes reportar alertas.`, accion: false };
-    return { icono: AlertTriangle, color: 'bg-red-100 text-red-700', titulo: 'Verificación rechazada', texto: identidad.motivo_rechazo ? `Motivo: ${identidad.motivo_rechazo}` : 'Envía nuevas fotos de tu cédula.', accion: true };
+    if (identidad === undefined) return { icono: Loader2, color: 'bg-gray-100 text-gray-500', titulo: 'Consultando tu cédula…', texto: '', accion: false, girar: true };
+    if (identidad === null) return { icono: AlertTriangle, color: 'bg-amber-100 text-amber-700', titulo: 'Cédula sin registrar', texto: 'Regístrala para poder reportar alertas e ingresar con ella.', accion: true };
+    if (!identidad.completa) return { icono: AlertTriangle, color: 'bg-amber-100 text-amber-700', titulo: 'Falta la fecha de expedición', texto: `Cédula terminada en ${identidad.ultimos_digitos}. Confírmala para poder reportar.`, accion: true };
+    return { icono: CheckCircle, color: 'bg-green-100 text-green-700', titulo: 'Cédula registrada', texto: `Terminada en ${identidad.ultimos_digitos} · es tu usuario para ingresar`, accion: false };
   })();
 
   return (
@@ -171,7 +198,7 @@ export function ProfileScreen({
               {tarjetaIdentidad.texto && <p className="text-xs text-gray-500 mt-0.5">{tarjetaIdentidad.texto}</p>}
             </div>
             {tarjetaIdentidad.accion && onVerificarIdentidad && (
-              <button onClick={onVerificarIdentidad} className="text-sm font-semibold text-blue-600 flex-shrink-0">Verificar</button>
+              <button onClick={onVerificarIdentidad} className="text-sm font-semibold text-blue-600 flex-shrink-0">Registrar</button>
             )}
           </div>
         </div>
@@ -228,6 +255,21 @@ export function ProfileScreen({
             </div>
             <Switch checked={cercanas} disabled={guardandoCercanas || loading} onCheckedChange={cambiarCercanas} aria-label="Alertas cerca de mí" />
           </div>
+          {isPushAvailable() && (
+            <div className="px-4 pb-4">
+              <button
+                onClick={probar}
+                disabled={probando}
+                className="w-full flex items-center justify-center gap-2 rounded-xl border border-orange-200 bg-orange-50 text-orange-800 text-sm font-medium py-2.5 disabled:opacity-60"
+              >
+                {probando ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden /> : <Bell className="w-4 h-4" aria-hidden />}
+                {probando ? 'Enviando…' : 'Probar notificaciones'}
+              </button>
+              <p className="text-[11px] text-gray-400 mt-1.5 text-center">
+                Si no llega: permite las notificaciones y pon la batería de la app en "Sin restricciones".
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Tarjeta: Estado */}
@@ -259,8 +301,10 @@ export function ProfileScreen({
           {[
             { label: 'Contactos de Emergencia',   icon: Phone,  color: 'bg-red-100 text-red-600',       action: onNavigateToEmergencyContact },
             { label: 'Acerca de AlertaCiudadana', icon: Info,   color: 'bg-purple-100 text-purple-600', action: onNavigateToAbout },
-            { label: 'Política de Privacidad',    icon: Shield, color: 'bg-blue-100 text-blue-600',     action: onNavigateToPrivacy },
-          ].map((item, i, arr) => (
+            { label: 'Mis datos y derechos',      icon: Scale,    color: 'bg-emerald-100 text-emerald-700', action: onNavigateToDerechos },
+            { label: 'Política de Tratamiento de Datos', icon: Shield, color: 'bg-blue-100 text-blue-600', action: onNavigateToPrivacy },
+            { label: 'Términos y Condiciones',    icon: FileText, color: 'bg-gray-100 text-gray-600',     action: onNavigateToTerms },
+          ].filter(item => item.action).map((item, i, arr) => (
             <button
               key={item.label}
               onClick={item.action}

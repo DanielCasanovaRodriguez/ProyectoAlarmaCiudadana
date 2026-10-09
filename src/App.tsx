@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { toUserMessage, isOfflineError } from './utils/errors';
+import { toUserMessage, isOfflineError, toAppError } from './utils/errors';
 import { WelcomeScreen } from './components/screens/WelcomeScreen';
 import { OnboardingScreen } from './components/screens/OnboardingScreen';
 import { LocationPermissionScreen } from './components/screens/LocationPermissionScreen';
@@ -12,6 +12,10 @@ import { TutorialScreen } from './components/screens/TutorialScreen';
 import { EmergencyContactScreen } from './components/screens/EmergencyContactScreen';
 import { AboutAppScreen } from './components/screens/AboutAppScreen';
 import { PrivacyPolicyScreen } from './components/screens/PrivacyPolicyScreen';
+import { LegalScreen } from './components/legal/LegalDocument';
+import { MisDerechosScreen } from './components/screens/MisDerechosScreen';
+import { obtenerMiConsentimiento } from './services/legalService';
+import { POLITICA_VERSION } from './config/legal';
 import { LoginScreen } from './components/screens/LoginScreen';
 import { RegisterScreen } from './components/screens/RegisterScreen';
 import { EmailVerificationScreen } from './components/screens/EmailVerificationScreen';
@@ -24,16 +28,14 @@ import { CollaboratorLoginScreen } from './components/screens/CollaboratorLoginS
 import { OperatorDashboard } from './components/screens/operator/OperatorDashboard';
 import { OperatorSettingsScreen } from './components/screens/operator/OperatorSettingsScreen';
 import { AdminPanel } from './components/screens/admin/AdminPanel';
-import { IdentityIntroScreen } from './components/screens/IdentityIntroScreen';
-import { IdentityScanScreen } from './components/screens/IdentityScanScreen';
-import { IdentitySubmitScreen } from './components/screens/IdentitySubmitScreen';
+import { IdentityFormScreen } from './components/screens/IdentityFormScreen';
 import { NearbyAlertScreen } from './components/screens/NearbyAlertScreen';
 import type { DatosRegistro } from './components/screens/RegisterScreen';
 import {
-  obtenerMiIdentidad, enviarVerificacion, identidadPermiteReportar,
-  type CapturaIdentidad, type MiIdentidad,
+  obtenerMiIdentidad, obtenerEstadoReporte, identidadPermiteReportar,
+  type MiIdentidad, type EstadoReporte,
 } from './services/identityService';
-import { reportarUbicacion, olvidarUbicacionEnviada, distanciaM, formatearDistancia } from './services/proximityService';
+import { reportarUbicacion, olvidarUbicacionEnviada, formatearDistancia } from './services/proximityService';
 import { getAlertTypeLabel } from './services/alertService';
 import { signUp } from './services/authService';
 import { Toaster } from './components/ui/sonner';
@@ -41,14 +43,14 @@ import { ConnectionBanner } from './components/ConnectionBanner';
 import { toast } from 'sonner';
 import {
   getUserAlertHistory,
-  getActiveAlerts,
+  getAlertasCercanas,
   createAlert as createAlertDB,
   updateAlertMediaUrls,
   cancelAlert as cancelAlertDB,
 } from './services/alertService.ts';
 import { completeRegistration, sendPasswordResetOTP, cerrarSesion } from './services/authService.ts';
 import { uploadMultipleFiles } from './services/mediaService';
-import { getCurrentLocation, hasLocationPermission, initNativeShell, registerForPush, unregisterPush, watchLocation, iniciarEscuchaNotificaciones, isNative } from './platform';
+import { getCurrentLocation, hasLocationPermission, initNativeShell, registerForPush, unregisterPush, watchLocation, iniciarEscuchaNotificaciones, isNative, isPushAvailable } from './platform';
 import { App as CapApp } from '@capacitor/app';
 import { supabase } from './utils/supabase/client';
 
@@ -64,6 +66,10 @@ export interface Alert {
   description?: string;
   mediaUrls?:   string[];
   status?:      'open' | 'ack' | 'resolved';
+  /** Distancia en metros a la ubicación del usuario (alertas cercanas). */
+  distanciaM?:  number | null;
+  /** Cerrada por la regla de 1 hora (no por el personal). */
+  cierreAutomatico?: boolean;
 }
 
 export type Screen =
@@ -87,14 +93,14 @@ export type Screen =
   | 'emergency-contact'
   | 'about-app'
   | 'privacy-policy'
+  | 'terms'
+  | 'mis-derechos'
   | 'operator-login'
   | 'operator-registration'
   | 'operator-dashboard'
   | 'operator-settings'
   | 'admin-panel'
-  | 'identity-intro'
-  | 'identity-scan'
-  | 'identity-submit'
+  | 'identity-form'
   | 'nearby-alert';
 
 export interface AppState {
@@ -121,13 +127,17 @@ export interface AppState {
   userLocation:        { lat: number; lng: number } | null;
   // Registro en dos pasos: datos del formulario y captura de la cédula
   pendingRegistration: DatosRegistro | null;
-  pendingIdentity:     CapturaIdentidad | null;
   registerError:       string | null;
-  identityMode:        'registro' | 'completar';
+  // Antiabuso: bloqueo temporal por reportes falsos
+  estadoReporte:       EstadoReporte | null;
+  // Versión de la política aceptada (undefined = aún no consultada)
+  consentimiento:      string | null | undefined;
   // Verificación de identidad del usuario (undefined = aún no consultada)
   identidad:           MiIdentidad | null | undefined;
   // Alerta cercana abierta desde una notificación
   nearbyAlertId:       string | null;
+  /** Incidente a abrir en el panel del operador (al tocar una notificación). */
+  incidenteAbrir:      string | null;
 }
 
 // ================================================================
@@ -142,6 +152,8 @@ function convertDbAlert(dbAlert: any): Alert {
     description: dbAlert.description,
     mediaUrls:   dbAlert.media_urls ?? [],
     status:      dbAlert.status,
+    distanciaM:  dbAlert.distancia_m ?? null,
+    cierreAutomatico: !!dbAlert.cierre_automatico,
   };
 }
 
@@ -184,11 +196,12 @@ export default function App() {
     pendingVerification: null,
     userLocation:        null,
     pendingRegistration: null,
-    pendingIdentity:     null,
     registerError:       null,
-    identityMode:        'registro',
+    estadoReporte:       null,
+    consentimiento:      undefined,
     identidad:           undefined,
     nearbyAlertId:       null,
+    incidenteAbrir:      null,
   });
 
   // ── Cargar historial propio del usuario ──────────────────────────
@@ -218,73 +231,67 @@ export default function App() {
     return () => clearInterval(id);
   }, [appState.auth.isLoggedIn, appState.currentScreen]);
 
-  // ── E5: Cargar alertas activas del área para el mapa ────────────
-  // Solo se ejecuta cuando el ciudadano está en el mapa.
-  // Incluye alertas de TODOS los usuarios, no solo las propias.
-  // Usa Supabase Realtime para actualizaciones instantáneas entre usuarios
-  // + polling de respaldo cada 15 s.
+  // ── E5: Alertas a ≤ 1 km de la ubicación REAL del usuario ────────
+  // La BD filtra por distancia (PostGIS, paso 13): nunca se descarga el
+  // país entero. Se vuelve a consultar cada 15 s y cuando la persona se
+  // mueve más de ~200 m. Sin ubicación no hay "alertas cerca de ti".
+  const puntoConsulta = appState.userLocation
+    ? `${appState.userLocation.lat.toFixed(3)},${appState.userLocation.lng.toFixed(3)}`
+    : null;
+  const ubicacionRef = useRef(appState.userLocation);
+  ubicacionRef.current = appState.userLocation;
+
   useEffect(() => {
     if (!appState.auth.isLoggedIn || appState.currentScreen !== 'main-map') return;
+    if (!puntoConsulta) {
+      setAppState(prev => (prev.areaAlerts.length ? { ...prev, areaAlerts: [] } : prev));
+      return;
+    }
 
     let idsConocidos: Set<string> | null = null;
-    const loadAreaAlerts = async () => {
+    let cancelado = false;
+    const cargarCercanas = async () => {
+      const punto = ubicacionRef.current;
+      if (!punto) return;
       try {
-        const activas = await getActiveAlerts();
+        const cercanas = await getAlertasCercanas(punto.lat, punto.lng);
+        if (cancelado) return;
         setAppState(prev => {
-          // Aviso dentro de la app (web y Android abierta) si aparece una alerta
-          // nueva de otra persona a 1 km o menos.
-          if (idsConocidos && prev.userLocation) {
-            for (const a of activas as any[]) {
-              if (idsConocidos.has(a.id) || a.es_propia || prev.alerts.some(x => x.id === a.id)) continue;
-              const d = distanciaM(prev.userLocation, { lat: a.lat, lng: a.lng });
-              if (d <= 1000) {
-                toast.warning(`Alerta cercana: ${getAlertTypeLabel(a.type_code)}`, {
-                  description: `${formatearDistancia(d)?.replace(/^a /, 'A ')} de ti`,
-                  duration: 10_000,
-                  action: { label: 'Ver', onClick: () => setAppState(p => ({ ...p, nearbyAlertId: a.id, currentScreen: 'nearby-alert' })) },
-                });
-              }
+          // Aviso dentro de la app si aparece una alerta nueva de otra persona a ≤ 1 km
+          // (con push activo, el aviso llega como notificación: no se duplica)
+          if (idsConocidos && !isPushAvailable()) {
+            for (const a of cercanas) {
+              if (idsConocidos.has(a.id) || a.es_propia || (a.distancia_m ?? Infinity) > 1000) continue;
+              toast.warning(`Alerta cercana: ${getAlertTypeLabel(a.type_code)}`, {
+                description: `${formatearDistancia(a.distancia_m)?.replace(/^a /, 'A ')} de ti`,
+                duration: 10_000,
+                action: { label: 'Ver', onClick: () => setAppState(p => ({ ...p, nearbyAlertId: a.id, currentScreen: 'nearby-alert' })) },
+              });
             }
           }
-          idsConocidos = new Set(activas.map((a: any) => a.id));
-          return { ...prev, areaAlerts: activas.map(convertDbAlert) };
+          idsConocidos = new Set(cercanas.map(a => a.id));
+          return { ...prev, areaAlerts: cercanas.map(convertDbAlert) };
         });
       } catch (error) {
-        console.error('Error cargando alertas del área:', error);
+        console.warn('Error cargando alertas cercanas:', error);
       }
     };
 
-    // Carga inicial inmediata
-    loadAreaAlerts();
+    cargarCercanas();
+    const intervalId = setInterval(cargarCercanas, 15_000);
 
-    // Polling de respaldo cada 15 s (por si Realtime falla)
-    const intervalId = setInterval(loadAreaAlerts, 15_000);
-
-    // ── Suscripción Realtime — actualizaciones instantáneas ────────
-    // Escucha INSERT, UPDATE y DELETE en la tabla alerts.
-    // Cuando cualquier usuario crea o modifica una alerta, todos los
-    // clientes en la pantalla del mapa reciben la actualización de inmediato.
+    // Cambios de las alertas propias llegan al instante (Realtime respeta RLS)
     const channel = supabase
-      .channel('public-area-alerts')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'alerts' },
-        (_payload) => {
-          // Recargar lista completa para mantener consistencia
-          loadAreaAlerts();
-        }
-      )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('✅ Realtime conectado — alertas del área');
-        }
-      });
+      .channel('alertas-cercanas')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'alerts' }, () => { cargarCercanas(); })
+      .subscribe();
 
     return () => {
+      cancelado = true;
       clearInterval(intervalId);
       supabase.removeChannel(channel);
     };
-  }, [appState.auth.isLoggedIn, appState.currentScreen]);
+  }, [appState.auth.isLoggedIn, appState.currentScreen, puntoConsulta]);
 
   // ── Historial de pantallas (botón atrás de Android) ─────────────
   // Pantallas raíz: "atrás" minimiza la app. Pantallas transitorias
@@ -445,10 +452,14 @@ export default function App() {
         toqueePendiente.current = datos; // se abre al terminar de restaurar la sesión
         return prev;
       }
-      if (datos.tipo === 'estado') {
+      if (datos.tipo === 'estado' || datos.tipo === 'mensaje') {
         return { ...prev, selectedAlertId: datos.alert_id!, currentScreen: 'alert-detail' };
       }
-      if (['operator-dashboard', 'admin-panel'].includes(prev.currentScreen)) return prev;
+      // Personal: se abre el incidente en su panel
+      if (prev.currentScreen === 'operator-dashboard' || prev.currentScreen === 'operator-settings') {
+        return { ...prev, incidenteAbrir: datos.alert_id!, currentScreen: 'operator-dashboard' };
+      }
+      if (prev.currentScreen === 'admin-panel') return prev;
       return { ...prev, nearbyAlertId: datos.alert_id!, currentScreen: 'nearby-alert' };
     });
   };
@@ -502,8 +513,12 @@ export default function App() {
   // ── Verificación de identidad del ciudadano ─────────────────────
   const refrescarIdentidad = async () => {
     try {
-      const i = await obtenerMiIdentidad();
-      setAppState(prev => ({ ...prev, identidad: i }));
+      const [i, e, c] = await Promise.all([
+        obtenerMiIdentidad(),
+        obtenerEstadoReporte().catch(() => null),
+        obtenerMiConsentimiento().catch(() => undefined),
+      ]);
+      setAppState(prev => ({ ...prev, identidad: i, estadoReporte: e, consentimiento: c }));
       return i;
     } catch {
       return undefined; // sin conexión: se consulta más tarde
@@ -514,22 +529,39 @@ export default function App() {
     if (appState.auth.isLoggedIn && appState.identidad === undefined) refrescarIdentidad();
   }, [appState.auth.isLoggedIn, appState.identidad]);
 
-  // Cuentas existentes sin cédula (o rechazada): se ofrece verificar una vez por sesión
-  const ofrecidaVerificacion = useRef(false);
+  // Cuentas creadas antes de la cédula (sin cédula o sin fecha de expedición):
+  // al abrir la app se les pide completarla antes de continuar. No aplica al
+  // personal (el servidor ya les permite reportar: puede_reportar = true).
+  // Primero la autorización de datos (Ley 1581): quien nunca la dio, o la dio
+  // para una versión anterior de la política, debe aceptarla para continuar.
+  const consentimientoPendiente = appState.consentimiento !== undefined
+    && appState.consentimiento !== POLITICA_VERSION;
+  const cedulaPendiente = !consentimientoPendiente
+    && appState.identidad !== undefined
+    && !identidadPermiteReportar(appState.identidad)
+    && appState.estadoReporte?.puede_reportar === false;
   useEffect(() => {
-    if (appState.currentScreen !== 'main-map' || ofrecidaVerificacion.current) return;
-    if (appState.identidad === undefined) return;
-    if (identidadPermiteReportar(appState.identidad)) return;
-    ofrecidaVerificacion.current = true;
-    setAppState(prev => ({ ...prev, identityMode: 'completar', currentScreen: 'identity-intro' }));
-  }, [appState.currentScreen, appState.identidad]);
+    if (appState.currentScreen !== 'main-map') return;
+    if (consentimientoPendiente) {
+      setAppState(prev => ({ ...prev, currentScreen: 'data-consent' }));
+    } else if (cedulaPendiente) {
+      setAppState(prev => ({ ...prev, currentScreen: 'identity-form' }));
+    }
+  }, [appState.currentScreen, consentimientoPendiente, cedulaPendiente]);
 
-  const bloqueoReporte = appState.identidad !== undefined && !identidadPermiteReportar(appState.identidad)
+  const bloqueadoHasta = appState.estadoReporte?.bloqueado_hasta && new Date(appState.estadoReporte.bloqueado_hasta) > new Date()
+    ? new Date(appState.estadoReporte.bloqueado_hasta) : null;
+  const bloqueoReporte = bloqueadoHasta
     ? {
-        mensaje: appState.identidad?.estado === 'rechazada'
-          ? `La verificación de tu cédula fue rechazada${appState.identidad.motivo_rechazo ? ` (${appState.identidad.motivo_rechazo})` : ''}. Envíala de nuevo para poder reportar alertas.`
-          : 'Para reportar alertas necesitas verificar tu identidad con tu cédula. Solo toma un minuto.',
-        onVerificar: () => setAppState(prev => ({ ...prev, identityMode: 'completar', currentScreen: 'identity-intro' })),
+        mensaje: `Tus reportes están suspendidos hasta el ${bloqueadoHasta.toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })} porque varias de tus alertas fueron marcadas como falsas.`,
+        onVerificar: undefined,
+      }
+    : appState.identidad !== undefined && !identidadPermiteReportar(appState.identidad)
+    ? {
+        mensaje: appState.identidad
+          ? 'Confirma la fecha de expedición de tu cédula para poder reportar alertas.'
+          : 'Para reportar alertas necesitas registrar tu cédula. Solo toma un minuto.',
+        onVerificar: () => navigateToScreen('identity-form'),
       }
     : null;
 
@@ -552,8 +584,12 @@ export default function App() {
   ): Promise<void> => {
 
     // 0. Solo cuentas con verificación de identidad enviada (la BD también lo exige)
-    if (appState.identidad !== undefined && !identidadPermiteReportar(appState.identidad)) {
-      throw new Error('Para reportar alertas necesitas verificar tu identidad con tu cédula.');
+    //    Si aún no se consultó (p. ej. sin conexión al abrir), se consulta ahora.
+    const identidadActual = appState.identidad !== undefined ? appState.identidad : await refrescarIdentidad();
+    if (identidadActual !== undefined && !identidadPermiteReportar(identidadActual)) {
+      throw new Error(identidadActual
+        ? 'Para reportar alertas confirma la fecha de expedición de tu cédula (menú → Perfil → Registrar).'
+        : 'Para reportar alertas necesitas registrar tu cédula (menú → Perfil → Registrar).');
     }
 
     // 1. Ubicación fresca del GPS en el momento del SOS. Si no se puede
@@ -574,13 +610,32 @@ export default function App() {
 
     // 2. Guardar en la BD. Solo se confirma al usuario cuando el servidor
     //    respondió; si falla, el error llega a AlarmSheet para reintentar.
-    const alertaCreada = await createAlertDB({
-      type_code:   type,
-      lat:         location.lat,
-      lng:         location.lng,
-      description: description || undefined,
-      media_urls:  [],
-    });
+    let alertaCreada: Awaited<ReturnType<typeof createAlertDB>>;
+    try {
+      alertaCreada = await createAlertDB({
+        type_code:   type,
+        lat:         location.lat,
+        lng:         location.lng,
+        description: description || undefined,
+        media_urls:  [],
+      });
+    } catch (err) {
+      // La BD rechaza (RLS) a quien no puede reportar: se explica el motivo real
+      if (toAppError(err).kind === 'permission') {
+        const [i, e] = await Promise.all([
+          refrescarIdentidad(), obtenerEstadoReporte().catch(() => null),
+        ]);
+        if (e?.bloqueado_hasta && new Date(e.bloqueado_hasta) > new Date()) {
+          throw new Error('Tus reportes están suspendidos temporalmente porque varias de tus alertas fueron marcadas como falsas.');
+        }
+        if (i !== undefined && !identidadPermiteReportar(i)) {
+          throw new Error(i
+            ? 'Para reportar alertas confirma la fecha de expedición de tu cédula (menú → Perfil → Registrar).'
+            : 'Para reportar alertas necesitas registrar tu cédula (menú → Perfil → Registrar).');
+        }
+      }
+      throw err;
+    }
 
     const alertaGuardada: Alert = {
       id:          alertaCreada.id,
@@ -685,8 +740,13 @@ export default function App() {
   };
 
   const handleDataConsentAccept = () => {
-    updateAppState({ auth: { ...appState.auth, isLoggedIn: true } });
-    navigateToScreen('location-permission');
+    setAppState(prev => ({
+      ...prev,
+      consentimiento: POLITICA_VERSION,
+      auth: { ...prev.auth, isLoggedIn: true },
+      // Cuenta nueva: sigue el permiso de ubicación; cuenta existente: al mapa
+      currentScreen: prev.user.hasCompletedOnboarding ? 'main-map' : 'location-permission',
+    }));
   };
 
   const handleSendPasswordResetCode = (email: string) => {
@@ -701,13 +761,14 @@ export default function App() {
     try { await cerrarSesion(); } catch (err) { console.warn('Error al cerrar sesión:', err); }
     ['admin_user', 'admin_profile', 'admin_token', 'admin_access_token', PERFIL_LOCAL_KEY].forEach(k => localStorage.removeItem(k));
     pushRegistered.current = false;
-    ofrecidaVerificacion.current = false;
     olvidarUbicacionEnviada();
     updateAppState({
       identidad:           undefined,
       pendingRegistration: null,
-      pendingIdentity:     null,
+      estadoReporte:       null,
+    consentimiento:      undefined,
       nearbyAlertId:       null,
+    incidenteAbrir:      null,
       auth:            { isLoggedIn: false, email: '', password: '', resetEmail: '' },
       user:            { name: '', hasLocationPermission: false, hasCompletedOnboarding: false },
       userLocation:    null,
@@ -784,91 +845,43 @@ export default function App() {
             onNavigateToLogin={() => navigateToScreen('login')}
             datosIniciales={appState.pendingRegistration}
             errorInicial={appState.registerError}
-            onContinuar={(datos) => {
+            onContinuar={async (datos) => {
+              // La BD valida la cédula y la fecha, garantiza que la cédula sea
+              // única (UNIQUE en la misma transacción) y la guarda cifrada.
+              const r = await signUp({
+                email: datos.email, password: datos.password,
+                nombres: datos.nombres, apellidos: datos.apellidos, phone: datos.phone,
+                cedula: datos.cedula, fechaExpedicion: datos.fechaExpedicion,
+              });
+              if (r.error) {
+                setAppState(prev => ({ ...prev, pendingRegistration: { ...datos, password: '' } }));
+                throw new Error(r.error);
+              }
               setAppState(prev => ({
                 ...prev,
-                pendingRegistration: datos,
+                pendingRegistration: null,
                 registerError: null,
-                identityMode: 'registro',
-                currentScreen: 'identity-intro',
+                pendingVerification: { email: datos.email, name: datos.nombres },
+                user: { ...prev.user, name: `${datos.nombres} ${datos.apellidos}` },
+                currentScreen: 'email-verification',
               }));
+              toast.success('Revisa tu correo', { description: 'Te enviamos un código para confirmar tu cuenta.' });
             }}
           />
         );
 
-      case 'identity-intro': {
-        const registro = appState.identityMode === 'registro';
-        if (registro && !appState.pendingRegistration) { navigateToScreen('register'); return null; }
+      case 'identity-form':
         return (
-          <IdentityIntroScreen
-            modo={appState.identityMode}
-            nombre={registro ? appState.pendingRegistration?.nombres : appState.user.name}
-            onContinuar={() => navigateToScreen('identity-scan')}
-            onVolver={() => navigateToScreen(registro ? 'register' : 'main-map')}
-            onAhoraNo={registro ? undefined : () => navigateToScreen('main-map')}
-          />
-        );
-      }
-
-      case 'identity-scan': {
-        const registro = appState.identityMode === 'registro';
-        const datos = appState.pendingRegistration;
-        if (registro && !datos) { navigateToScreen('register'); return null; }
-        const [nombresUsuario, ...resto] = (appState.user.name || '').split(' ');
-        return (
-          <IdentityScanScreen
-            modo={appState.identityMode}
-            registro={registro
-              ? { numero: datos!.cedula, nombres: datos!.nombres, apellidos: datos!.apellidos }
-              : { nombres: nombresUsuario ?? '', apellidos: resto.join(' ') }}
-            onVolver={() => navigateToScreen('identity-intro')}
-            onCorregirDatos={registro ? () => navigateToScreen('register') : undefined}
-            onEnviar={async (captura) => {
-              if (registro) {
-                // Se crea la cuenta al final del registro; las fotos se envían
-                // después de confirmar el correo (cuando ya hay sesión).
-                const r = await signUp({
-                  email: datos!.email, password: datos!.password,
-                  nombres: datos!.nombres, apellidos: datos!.apellidos, phone: datos!.phone,
-                });
-                if (r.error) {
-                  if (/ya existe una cuenta/i.test(r.error)) {
-                    setAppState(prev => ({ ...prev, registerError: r.error, currentScreen: 'register' }));
-                    return;
-                  }
-                  throw new Error(r.error);
-                }
-                setAppState(prev => ({
-                  ...prev,
-                  pendingIdentity: captura,
-                  pendingRegistration: prev.pendingRegistration ? { ...prev.pendingRegistration, password: '' } : null,
-                  pendingVerification: { email: datos!.email, name: datos!.nombres },
-                  user: { ...prev.user, name: `${datos!.nombres} ${datos!.apellidos}` },
-                  currentScreen: 'email-verification',
-                }));
-                toast.success('Revisa tu correo', { description: 'Te enviamos un código para confirmar tu cuenta.' });
-              } else {
-                const r = await enviarVerificacion(captura);
-                await refrescarIdentidad();
-                toast.success('Cédula enviada', { description: `Vinculamos la cédula terminada en ${r.ultimos_digitos} a tu cuenta.` });
-                navigateToScreen('main-map');
-              }
+          <IdentityFormScreen
+            nombre={appState.user.name}
+            actual={appState.identidad}
+            onListo={(ultimos) => {
+              toast.success('Cédula registrada', { description: `Terminada en ${ultimos}. Desde ahora es tu usuario para ingresar.` });
+              setAppState(prev => ({ ...prev, identidad: undefined, currentScreen: 'main-map' }));
             }}
-          />
-        );
-      }
-
-      case 'identity-submit':
-        if (!appState.pendingIdentity) { navigateToScreen('data-consent'); return null; }
-        return (
-          <IdentitySubmitScreen
-            captura={appState.pendingIdentity}
-            onListo={() => {
-              setAppState(prev => ({ ...prev, pendingIdentity: null, pendingRegistration: null, identidad: undefined, currentScreen: 'data-consent' }));
-            }}
-            onContinuarSinVerificar={() => {
-              setAppState(prev => ({ ...prev, pendingIdentity: null, pendingRegistration: null, identidad: undefined, currentScreen: 'data-consent' }));
-            }}
+            obligatoria={cedulaPendiente}
+            onVolver={() => navigateToScreen('main-map')}
+            onCerrarSesion={handleLogout}
           />
         );
 
@@ -896,15 +909,7 @@ export default function App() {
               const emailParaRegistro = appState.pendingVerification?.email ?? '';
               const result = await completeRegistration(emailParaRegistro);
               if (result.success) {
-                if (appState.pendingIdentity && session?.user) {
-                  const meta = session.user.user_metadata ?? {};
-                  setAppState(prev => ({
-                    ...prev,
-                    user: { ...prev.user, name: [meta.nombres, meta.apellidos].filter(Boolean).join(' ') || prev.user.name },
-                    auth: { ...prev.auth, email: session.user.email || prev.auth.email, password: '' },
-                    currentScreen: 'identity-submit',
-                  }));
-                } else if (session?.user) {
+                if (session?.user) {
                   const meta = session.user.user_metadata ?? {};
                   handleRegister([meta.nombres, meta.apellidos].filter(Boolean).join(' ') || meta.full_name || '', session.user.email || '', '');
                 } else {
@@ -971,7 +976,9 @@ export default function App() {
         return (
           <DataConsentScreen
             userName={appState.user.name}
+            actualizacion={!!appState.consentimiento}
             onAccept={handleDataConsentAccept}
+            onCerrarSesion={handleLogout}
           />
         );
 
@@ -990,9 +997,9 @@ export default function App() {
               });
               navigateToScreen('main-map');
             }}
-            onLocationDenied={(fallbackCoords) => {
+            onLocationDenied={() => {
+              // Sin ubicación real no se inventa una: el mapa queda para explorar
               updateAppState({
-                userLocation: fallbackCoords ?? null,
                 user: {
                   ...appState.user,
                   hasLocationPermission:  false,
@@ -1015,6 +1022,8 @@ export default function App() {
             onNavigateToHistory={() => navigateToScreen('alert-history')}
             onNavigateToProfile={() => navigateToScreen('profile')}
             onNavigateToTutorial={() => navigateToScreen('tutorial')}
+            onVerAlerta={(id) => setAppState(prev => ({ ...prev, nearbyAlertId: id, currentScreen: 'nearby-alert' }))}
+            onActivarUbicacion={() => navigateToScreen('location-permission')}
             bloqueoReporte={bloqueoReporte}
           />
         );
@@ -1055,6 +1064,8 @@ export default function App() {
             alert={appState.lastCreatedAlert!}
             onBackToMap={() => navigateToScreen('main-map')}
             onViewHistory={() => navigateToScreen('alert-history')}
+            nombreUsuario={appState.user.name}
+            onConfigurarContactos={() => navigateToScreen('emergency-contact')}
           />
         );
 
@@ -1069,9 +1080,11 @@ export default function App() {
             onNavigateToEmergencyContact={() => navigateToScreen('emergency-contact')}
             onNavigateToAbout={() => navigateToScreen('about-app')}
             onNavigateToPrivacy={() => navigateToScreen('privacy-policy')}
+            onNavigateToTerms={() => navigateToScreen('terms')}
+            onNavigateToDerechos={() => navigateToScreen('mis-derechos')}
             onLogout={handleLogout}
             identidad={appState.identidad}
-            onVerificarIdentidad={() => setAppState(prev => ({ ...prev, identityMode: 'completar', currentScreen: 'identity-intro' }))}
+            onVerificarIdentidad={() => navigateToScreen('identity-form')}
           />
         );
 
@@ -1086,6 +1099,17 @@ export default function App() {
 
       case 'privacy-policy':
         return <PrivacyPolicyScreen onBack={() => navigateToScreen('profile')} />;
+
+      case 'terms':
+        return <LegalScreen tipo="terminos" onBack={() => navigateToScreen('profile')} />;
+
+      case 'mis-derechos':
+        return (
+          <MisDerechosScreen
+            onBack={() => navigateToScreen('profile')}
+            onVerPolitica={() => navigateToScreen('privacy-policy')}
+          />
+        );
 
       case 'operator-login':
         return (
@@ -1108,7 +1132,8 @@ export default function App() {
           <OperatorDashboard
             onNavigateToSettings={() => navigateToScreen('operator-settings')}
             onLogout={handleLogout}
-            accessToken={localStorage.getItem('admin_access_token') || undefined}
+            abrirIncidenteId={appState.incidenteAbrir}
+            onIncidenteAbierto={() => setAppState(prev => ({ ...prev, incidenteAbrir: null }))}
           />
         );
 
@@ -1117,6 +1142,7 @@ export default function App() {
           <OperatorSettingsScreen
             onBack={() => navigateToScreen('operator-dashboard')}
             onSave={() => navigateToScreen('operator-dashboard')}
+            onLogout={handleLogout}
           />
         );
 
@@ -1142,7 +1168,7 @@ export default function App() {
   }
 
   return (
-    <div className="h-screen w-full bg-gray-100">
+    <div className="h-screen h-[100dvh] w-full bg-gray-100">
       <ConnectionBanner />
       {renderCurrentScreen()}
       <Toaster />

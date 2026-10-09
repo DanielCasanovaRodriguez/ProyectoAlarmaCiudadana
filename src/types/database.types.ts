@@ -82,6 +82,8 @@ export interface Database {
           lng:                  number;
           status:               AlertStatus;
           anonimo:              boolean;
+          marcada_falsa?:       boolean;
+          cierre_automatico?:   boolean;
           operador_asignado_id: string | null;
           ack_at:               string | null;
           resolved_at:          string | null;
@@ -205,6 +207,20 @@ export interface Database {
         Update: {
           note?: string | null;
         };
+        Relationships: [];
+      };
+
+      // ----------------------------------------------------------
+      // solicitudes_titular (habeas data; solo lectura desde la app)
+      // ----------------------------------------------------------
+      solicitudes_titular: {
+        Row: {
+          id: string; user_id: string | null; tipo: string; mensaje: string; estado: string;
+          respuesta: string | null; creada_en: string; fecha_limite: string;
+          respondida_en: string | null; respondida_por: string | null;
+        };
+        Insert: never;
+        Update: never;
         Relationships: [];
       };
 
@@ -426,6 +442,15 @@ export interface Database {
     Views:          Record<string, never>;
     // RPC definidas en supabase/migrations/20260925000001_funciones_negocio.sql
     Functions: {
+      // Pasos 13-14: proximidad real (≤ 1 km) y exploración del área visible
+      alertas_cercanas: {
+        Args: { p_lat: number; p_lng: number; p_radio_m?: number };
+        Returns: AlertaCercanaRow[];
+      };
+      alertas_en_area: {
+        Args: { p_sur: number; p_oeste: number; p_norte: number; p_este: number };
+        Returns: AlertaCercanaRow[];
+      };
       alertas_activas_publicas: {
         Args: Record<string, never>;
         Returns: {
@@ -442,36 +467,7 @@ export interface Database {
         Args: { p_alert_id: string };
         Returns: Database['public']['Tables']['alerts']['Row'];
       };
-      registrar_identidad: {
-        Args: {
-          p_numero: string; p_modelo: string; p_metodo: string;
-          p_coincide_numero: boolean; p_coincide_nombre: boolean;
-          p_datos: Record<string, unknown> | null; p_frente: string; p_reverso: string;
-        };
-        Returns: { estado: EstadoIdentidad; ultimos_digitos: string }[];
-      };
-      mi_identidad: {
-        Args: Record<string, never>;
-        Returns: { estado: EstadoIdentidad; ultimos_digitos: string; motivo_rechazo: string | null; intentos: number; actualizado_at: string }[];
-      };
       puede_reportar: { Args: Record<string, never>; Returns: boolean };
-      admin_listar_identidades: {
-        Args: { p_estado?: EstadoIdentidad | null };
-        Returns: {
-          user_id: string; nombres: string | null; apellidos: string | null; email: string | null;
-          estado: EstadoIdentidad; ultimos_digitos: string; modelo_documento: string; metodo_lectura: string;
-          coincide_numero: boolean; coincide_nombre: boolean; intentos: number; motivo_rechazo: string | null;
-          created_at: string; updated_at: string;
-        }[];
-      };
-      admin_detalle_identidad: {
-        Args: { p_user_id: string };
-        Returns: { numero: string; datos_documento: Record<string, unknown> | null; frente_path: string; reverso_path: string; estado: EstadoIdentidad }[];
-      };
-      revisar_identidad: {
-        Args: { p_user_id: string; p_estado: 'verificada' | 'rechazada'; p_motivo?: string | null };
-        Returns: undefined;
-      };
       actualizar_mi_ubicacion: {
         Args: { p_lat: number; p_lng: number; p_precision_m?: number | null };
         Returns: undefined;
@@ -485,14 +481,53 @@ export interface Database {
           es_propia: boolean; distancia_m: number | null;
         }[];
       };
+      mi_cedula: { Args: Record<string, never>; Returns: { ultimos_digitos: string; completa: boolean }[] };
+      mi_estado_reporte: {
+        Args: Record<string, never>;
+        Returns: { puede_reportar: boolean; bloqueado_hasta: string | null; reportes_falsos: number }[];
+      };
+      registrar_mi_cedula: { Args: { p_numero: string; p_fecha: string }; Returns: { ultimos_digitos: string }[] };
+      admin_listar_cedulas: {
+        Args: Record<string, never>;
+        Returns: {
+          user_id: string; nombres: string | null; apellidos: string | null; email: string | null;
+          ultimos_digitos: string; completa: boolean; estado_cuenta: string; reportes_falsos: number; created_at: string;
+        }[];
+      };
+      admin_ver_cedula: { Args: { p_user_id: string }; Returns: { numero: string; fecha_expedicion: string | null }[] };
+      admin_liberar_cedula: { Args: { p_user_id: string; p_motivo: string }; Returns: undefined };
+      marcar_alerta_falsa: { Args: { p_alert_id: string; p_nota?: string | null }; Returns: undefined };
       registrar_dispositivo: { Args: { p_token: string; p_plataforma?: string }; Returns: undefined };
       eliminar_dispositivo:  { Args: { p_token: string }; Returns: undefined };
       rol_actual:     { Args: Record<string, never>; Returns: string | null };
       es_admin:       { Args: Record<string, never>; Returns: boolean };
       es_staff:       { Args: Record<string, never>; Returns: boolean };
       es_colaborador: { Args: Record<string, never>; Returns: boolean };
+      // Paso 10-11: autorización de datos y solicitudes del titular
+      aceptar_politica: { Args: { p_version: string }; Returns: undefined };
+      probar_mis_notificaciones: { Args: Record<string, never>; Returns: unknown };
+      enviar_mensaje_ciudadano: { Args: { p_alert_id: string; p_mensaje: string }; Returns: unknown };
+      crear_solicitud_titular: { Args: { p_tipo: string; p_mensaje: string }; Returns: { id: string; fecha_limite: string }[] };
+      admin_responder_solicitud: { Args: { p_id: string; p_estado: string; p_respuesta: string }; Returns: undefined };
+      admin_listar_solicitudes: {
+        Args: Record<string, never>;
+        Returns: {
+          id: string; user_id: string | null; nombre: string | null; email: string | null; tipo: string; mensaje: string;
+          estado: string; respuesta: string | null; creada_en: string; fecha_limite: string; respondida_en: string | null;
+        }[];
+      };
+      admin_evidencias_titular: { Args: { p_user_id: string }; Returns: { ruta: string }[] };
+      admin_suprimir_titular: { Args: { p_user_id: string; p_solicitud_id: string | null; p_respuesta: string }; Returns: undefined };
     };
     Enums:          Record<string, never>;
     CompositeTypes: Record<string, never>;
   };
+}
+
+/** Alerta pública (sin user_id) con distancia al punto consultado. */
+export interface AlertaCercanaRow {
+  id: string; type_code: string; description: string | null; severity: number;
+  lat: number; lng: number; status: AlertStatus; media_urls: string[];
+  created_at: string; updated_at: string; resolved_at: string | null; es_propia: boolean;
+  distancia_m: number | null;
 }

@@ -190,7 +190,7 @@ export function AdminUsersScreen({ accessToken }: AdminUsersScreenProps) {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6">
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
@@ -250,7 +250,35 @@ export function AdminUsersScreen({ accessToken }: AdminUsersScreenProps) {
               {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}
             </div>
           ) : filteredUsers.length > 0 ? (
-            <div className="overflow-x-auto">
+            <>
+            {/* Celular: tarjetas con las acciones a la vista */}
+            <ul className="md:hidden divide-y divide-gray-100 -mx-2">
+              {filteredUsers.map((user, idx) => (
+                <li key={user.id ?? `m-${idx}`} className="px-2 py-3 flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">
+                      {user.name || user.full_name || <span className="text-gray-400 italic">Sin nombre</span>}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                      <RoleBadge role={user.role ?? 'citizen'} />
+                      <StatusBadge status={user.status ?? 'active'} />
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">{user.phone ?? 'Sin teléfono'} · desde {formatDate(user.createdAt)}</p>
+                  </div>
+                  <div className="flex flex-shrink-0">
+                    <Button variant="ghost" size="icon" onClick={() => handleEditUser(user)} aria-label="Editar usuario" className="h-10 w-10">
+                      <Edit className="w-4 h-4" />
+                    </Button>
+                    {user.id !== currentUserId && (
+                      <Button variant="ghost" size="icon" onClick={() => handleDeleteUser(user)} aria-label="Suspender usuario" className="h-10 w-10 text-red-500 hover:bg-red-50">
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+            <div className="hidden md:block overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -289,6 +317,7 @@ export function AdminUsersScreen({ accessToken }: AdminUsersScreenProps) {
                 </TableBody>
               </Table>
             </div>
+            </>
           ) : (
             <EmptyState icon={Users} title="Sin usuarios" description="No se encontraron usuarios con los filtros aplicados" />
           )}

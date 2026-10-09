@@ -1,65 +1,33 @@
 import { createClient } from '../utils/supabase/client';
 import { toUserMessage } from './errors';
+import { interpretarErrorEnvio, registrarEnvio, type ResultadoEnvio } from './envioCodigos';
 
-/**
- * Después del registro, reenvía el código de confirmación de email de Supabase (8 dígitos)
- * @param email - Email del destinatario
- * @returns Promise con el resultado del envío
- */
-export async function sendVerificationEmail(email: string): Promise<{ 
-  success: boolean; 
-  error?: string;
-}> {
+/** Reenvía el código de confirmación del registro (8 dígitos). */
+export async function sendVerificationEmail(email: string): Promise<ResultadoEnvio> {
   try {
     const supabase = createClient();
-    
-    console.log('📧 Reenviando código de confirmación de Supabase a:', email);
-    
-    // Usar resend para reenviar el email de confirmación de Supabase (8 dígitos)
-    const { error } = await supabase.auth.resend({
-      type: 'signup',
-      email: email,
-    });
-    
-    if (error) {
-      console.error('❌ Error al reenviar confirmación:', error.message);
-      return { success: false, error: toUserMessage(error) };
-    }
-    
-    console.log('✅ Código de confirmación de 8 dígitos reenviado exitosamente por email');
-    console.log('📧 Revisa tu correo electrónico para obtener el código');
+    const { error } = await supabase.auth.resend({ type: 'signup', email });
+    if (error) return interpretarErrorEnvio(error);
+    registrarEnvio(email);
     return { success: true };
-  } catch (error: any) {
-    console.error('❌ Error al enviar código:', error);
-    return { success: false, error: 'Error al enviar código de verificación' };
+  } catch (error) {
+    return interpretarErrorEnvio(error);
   }
 }
 
 /**
- * Envía un código OTP por correo para el segundo factor de colaboradores.
- * El código lo genera y valida exclusivamente Supabase Auth: nunca se
- * genera ni se compara en el cliente.
+ * Código por correo para el segundo factor de colaboradores. Lo genera y
+ * valida exclusivamente Supabase Auth.
  */
-export async function sendLoginOTP(email: string): Promise<{
-  success: boolean;
-  error?: string;
-}> {
+export async function sendLoginOTP(email: string): Promise<ResultadoEnvio> {
   try {
     const supabase = createClient();
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { shouldCreateUser: false },
-    });
-
-    if (error) {
-      if (error.message.toLowerCase().includes('rate limit')) {
-        return { success: false, error: 'Se alcanzó el límite de envíos de correo. Espera unos minutos e intenta de nuevo.' };
-      }
-      return { success: false, error: toUserMessage(error) };
-    }
+    const { error } = await supabase.auth.signInWithOtp({ email, options: { shouldCreateUser: false } });
+    if (error) return interpretarErrorEnvio(error);
+    registrarEnvio(email);
     return { success: true };
-  } catch (error: any) {
-    return { success: false, error: toUserMessage(error, 'No se pudo enviar el código de verificación') };
+  } catch (error) {
+    return interpretarErrorEnvio(error);
   }
 }
 
@@ -81,8 +49,6 @@ export async function verifyEmailCode(
 }> {
   try {
     const supabase = createClient();
-    
-    console.log(`🔐 Verificando código con Supabase (${type}) para:`, email);
     
     const { data, error } = await supabase.auth.verifyOtp({
       email: email,

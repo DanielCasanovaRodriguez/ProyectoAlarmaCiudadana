@@ -1,5 +1,6 @@
 import { supabase } from '../utils/supabase/client';
-import { toUserMessage } from '../utils/errors';
+import { toUserMessage, toAppError } from '../utils/errors';
+import { interpretarErrorEnvio, registrarEnvio, type ResultadoEnvio } from '../utils/envioCodigos';
 import type { Database } from '../types/database.types';
 
 // ================================================================
@@ -15,7 +16,7 @@ export type UserProfile = Database['public']['Tables']['profiles']['Row'];
 export async function registrarUsuario(
   email: string,
   password: string,
-  datos: { nombres: string; apellidos: string; phone?: string },
+  datos: { nombres: string; apellidos: string; phone?: string; cedula: string; fechaExpedicion: string },
 ) {
   const { data, error } = await supabase.auth.signUp({
     email,
@@ -27,6 +28,10 @@ export async function registrarUsuario(
         apellidos: datos.apellidos,
         full_name: `${datos.nombres} ${datos.apellidos}`.trim(),
         phone:     datos.phone ?? null,
+        // La BD valida la cédula, garantiza que sea única, la guarda cifrada
+        // y la elimina de estos metadatos (no queda en texto plano).
+        cedula:           datos.cedula,
+        fecha_expedicion: datos.fechaExpedicion,
       },
     },
   });
@@ -211,19 +216,23 @@ export async function completeRegistration(_email: string) {
 // ================================================================
 // sendPasswordResetOTP
 // ================================================================
-export async function sendPasswordResetOTP(email: string) {
+export async function sendPasswordResetOTP(email: string): Promise<ResultadoEnvio> {
   try {
+    if (!esCorreo(email)) {
+      await recuperarConCedula(email);
+      registrarEnvio(email);
+      return { success: true };
+    }
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/reset-password`,
     });
-
-    if (error?.message.includes('rate limit')) {
-      return { success: false, error: 'Demasiados intentos. Espera unos minutos.' };
-    }
-
+    // Solo se informan los límites de envío: otros errores no deben revelar
+    // si el correo está registrado.
+    if (error && /rate limit|security purposes|seconds/i.test(error.message)) return interpretarErrorEnvio(error);
+    registrarEnvio(email);
     return { success: true };
-  } catch (error: any) {
-    return { success: false, error: toUserMessage(error) };
+  } catch (error) {
+    return interpretarErrorEnvio(error);
   }
 }
 
@@ -246,10 +255,13 @@ export async function signUp(data: {
   nombres:   string;
   apellidos: string;
   phone?:    string;
+  cedula:    string;
+  fechaExpedicion: string;
 }) {
   try {
     const result = await registrarUsuario(data.email, data.password, {
       nombres: data.nombres, apellidos: data.apellidos, phone: data.phone,
+      cedula: data.cedula, fechaExpedicion: data.fechaExpedicion,
     });
     return { data: result, error: null };
   } catch (error: any) {
@@ -272,6 +284,10 @@ export async function updatePassword(password: string) {
 
 export async function verifyPasswordResetOTP(email: string, code: string) {
   try {
+    if (!esCorreo(email)) {
+      await verificarRecuperacionConCedula(email, code);
+      return { success: true, error: null };
+    }
     const { error } = await supabase.auth.verifyOtp({
       email,
       token: code,
@@ -284,3 +300,65 @@ export async function verifyPasswordResetOTP(email: string, code: string) {
     return { success: false, error: toUserMessage(error) };
   }
 }
+
+// ================================================================
+// Acceso de ciudadanos con CÉDULA + contraseña
+// (Edge Function acceso-cedula: limita intentos, no revela el correo)
+// ================================================================
+export class AccesoCedulaError extends Error {
+  codigo?: string;
+  emailEnmascarado?: string;
+  constructor(mensaje: string, codigo?: string, emailEnmascarado?: string) {
+    super(mensaje);
+    this.name = 'AccesoCedulaError';
+    this.codigo = codigo;
+    this.emailEnmascarado = emailEnmascarado;
+  }
+}
+
+async function invocarAccesoCedula(body: Record<string, string>): Promise<unknown> {
+  const { data, error } = await supabase.functions.invoke('acceso-cedula', { body });
+  if (error) {
+    // Errores HTTP de la función: traen un mensaje ya preparado para el usuario
+    const ctx = (error as { context?: Response }).context;
+    let cuerpo: { error?: string; codigo?: string; email_enmascarado?: string } | null = null;
+    if (ctx && typeof ctx.json === 'function') {
+      try { cuerpo = await ctx.json(); } catch { cuerpo = null; }
+    }
+    if (cuerpo?.error) throw new AccesoCedulaError(cuerpo.error, cuerpo.codigo, cuerpo.email_enmascarado);
+    throw toAppError(error, 'No se pudo completar la solicitud. Intenta de nuevo.');
+  }
+  return data;
+}
+
+async function llamarAccesoCedula(body: Record<string, string>) {
+  const data = await invocarAccesoCedula(body);
+  const s = data as { access_token?: string; refresh_token?: string };
+  if (!s?.access_token || !s?.refresh_token) throw new Error('No se pudo iniciar sesión. Intenta de nuevo.');
+  const { data: sesion, error: errSesion } = await supabase.auth.setSession({
+    access_token: s.access_token, refresh_token: s.refresh_token,
+  });
+  if (errSesion || !sesion.session) throw toAppError(errSesion, 'No se pudo iniciar sesión. Intenta de nuevo.');
+  return sesion;
+}
+
+export function iniciarSesionConCedula(cedula: string, password: string) {
+  return llamarAccesoCedula({ accion: 'ingresar', cedula, password });
+}
+
+export function confirmarCorreoConCedula(cedula: string, codigo: string) {
+  return llamarAccesoCedula({ accion: 'confirmar', cedula, codigo });
+}
+
+/** Recuperación de contraseña con cédula: el código llega al correo de la cuenta. */
+export async function recuperarConCedula(cedula: string): Promise<string> {
+  const r = await invocarAccesoCedula({ accion: 'recuperar', cedula }) as { mensaje?: string };
+  return r?.mensaje ?? 'Si la cédula está registrada, enviamos un código al correo de la cuenta.';
+}
+
+export function verificarRecuperacionConCedula(cedula: string, codigo: string) {
+  return llamarAccesoCedula({ accion: 'verificar_recuperacion', cedula, codigo });
+}
+
+/** ¿El identificador escrito es un correo (si no, se trata como cédula)? */
+export const esCorreo = (identificador: string) => identificador.includes('@');

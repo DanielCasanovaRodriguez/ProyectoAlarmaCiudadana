@@ -7,8 +7,10 @@ import {
   Settings,
   ScrollText,
   IdCard,
+  Scale,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  X,
 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '../ui/button';
@@ -17,10 +19,14 @@ interface AdminSidebarProps {
   currentSection: string;
   onSectionChange: (section: string) => void;
   userRole: 'admin' | 'operator' | 'auditor';
+  /** Celular: menú en cajón, a pantalla completa de alto, con botón cerrar. */
+  movil?: boolean;
+  onClose?: () => void;
 }
 
-export function AdminSidebar({ currentSection, onSectionChange, userRole }: AdminSidebarProps) {
-  const [collapsed, setCollapsed] = useState(false);
+export function AdminSidebar({ currentSection, onSectionChange, userRole, movil = false, onClose }: AdminSidebarProps) {
+  const [colapsadoEscritorio, setCollapsed] = useState(false);
+  const collapsed = movil ? false : colapsadoEscritorio;
 
   const menuItems = [
     { 
@@ -37,8 +43,14 @@ export function AdminSidebar({ currentSection, onSectionChange, userRole }: Admi
     },
     {
       id: 'identidad',
-      label: 'Verificación de identidad',
+      label: 'Cédulas registradas',
       icon: IdCard,
+      roles: ['admin', 'auditor']
+    },
+    {
+      id: 'solicitudes',
+      label: 'Solicitudes (habeas data)',
+      icon: Scale,
       roles: ['admin', 'auditor']
     },
     { 
@@ -77,7 +89,8 @@ export function AdminSidebar({ currentSection, onSectionChange, userRole }: Admi
   const visibleItems = menuItems.filter(item => item.roles.includes(userRole));
 
   return (
-    <div className={`h-screen bg-white border-r border-gray-200 flex flex-col transition-all duration-300 ${collapsed ? 'w-16' : 'w-64'}`}>
+    <div className={`h-full bg-white border-r border-gray-200 flex flex-col transition-all duration-300 ${movil ? 'w-72 max-w-[85vw]' : collapsed ? 'w-16' : 'w-64'}`}
+      style={movil ? { paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' } : undefined}>
       {/* Header */}
       <div className="p-4 border-b border-gray-200 flex items-center justify-between">
         {!collapsed && (
@@ -94,10 +107,11 @@ export function AdminSidebar({ currentSection, onSectionChange, userRole }: Admi
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => setCollapsed(!collapsed)}
-          className="p-1 h-8 w-8"
+          onClick={() => (movil ? onClose?.() : setCollapsed(!collapsed))}
+          className="p-1 h-9 w-9"
+          aria-label={movil ? 'Cerrar menú' : collapsed ? 'Expandir menú' : 'Contraer menú'}
         >
-          {collapsed ? (
+          {movil ? <X className="w-5 h-5" /> : collapsed ? (
             <ChevronRight className="w-4 h-4" />
           ) : (
             <ChevronLeft className="w-4 h-4" />
@@ -114,8 +128,8 @@ export function AdminSidebar({ currentSection, onSectionChange, userRole }: Admi
           return (
             <button
               key={item.id}
-              onClick={() => onSectionChange(item.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg mb-1 transition-colors ${
+              onClick={() => { onSectionChange(item.id); onClose?.(); }}
+              className={`w-full flex items-center gap-3 px-3 ${movil ? 'py-3' : 'py-2.5'} rounded-lg mb-1 transition-colors ${
                 isActive 
                   ? 'bg-red-50 text-red-600' 
                   : 'text-gray-700 hover:bg-gray-100'

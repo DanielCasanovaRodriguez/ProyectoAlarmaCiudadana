@@ -125,7 +125,7 @@ export function ResetPasswordScreen({
               Ingresa una nueva contraseña segura para tu cuenta
             </p>
             <p className="text-sm text-gray-500 mt-2 font-medium">
-              {email}
+              {email.includes('@') ? email : `Cédula terminada en ${email.slice(-4)}`}
             </p>
           </div>
 

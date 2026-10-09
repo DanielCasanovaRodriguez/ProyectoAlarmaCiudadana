@@ -59,3 +59,27 @@ Firebase es de Google y se crea con tu cuenta; son 5 minutos:
 - Sin ubicación en segundo plano: el aviso llega según la **última ubicación conocida en las últimas 24 h** (la de la última vez que se abrió la app). Rastreo continuo requeriría `ACCESS_BACKGROUND_LOCATION` y justificarlo ante Google Play.
 - En la web no hay push con la pestaña cerrada (solo aviso con la app abierta).
 - Aviso a contactos de emergencia por SMS: no implementado (requiere proveedor con costo).
+
+
+---
+
+## v1.6.0 (2026-10-08): notificaciones funcionando de punta a punta
+
+**Causa de que no llegara ningún push:** el secreto `FIREBASE_SERVICE_ACCOUNT` quedó guardado **incompleto** (solo la primera línea del archivo JSON de Google, que tiene varias líneas). La función `notificar-alerta` guardaba la notificación en la bandeja de la app y luego fallaba al leer la llave → HTTP 500 en cada alerta, 0 push enviados.
+
+**Corrección:**
+- Secreto guardado de nuevo en una sola línea (base64). La función acepta JSON o base64 y explica el error si la llave está incompleta.
+- Modo `DIAGNOSTICO` (verifica la llave con Google sin enviar nada) → `{"ok":true,"proyecto":"alertaciudadana-fe5bd"}`.
+- Push de prueba real a la cuenta del responsable → **enviado por FCM** (`enviados: 1`); el token de una instalación vieja se limpió solo.
+- Errores por dispositivo no detienen a los demás; tokens de celulares que desinstalaron la app se eliminan; una notificación por alerta (`tag`), alta prioridad y visible en la pantalla de bloqueo.
+- **Perfil → Probar notificaciones**: cualquier persona comprueba que le llegan (máx. 1 por minuto).
+- Con la app abierta no se duplica el aviso (push + aviso interno).
+
+**Quién recibe qué**
+| Evento | Destinatarios |
+|---|---|
+| Alerta nueva | Operadores y administradores activos + personas a ≤ 1 km (última ubicación de las últimas 24 h, con "Alertas cerca de mí" activo) |
+| Cambio de estado | Quien reportó |
+| Cierre automático (1 hora) | Quien reportó: "Tu alerta se cerró… si continúa, repórtala de nuevo o llama al 123" |
+
+Para que lleguen con la app cerrada: permiso de notificaciones concedido y batería de la app en "Sin restricciones" (Xiaomi, Huawei, Samsung y otros cierran apps en segundo plano).

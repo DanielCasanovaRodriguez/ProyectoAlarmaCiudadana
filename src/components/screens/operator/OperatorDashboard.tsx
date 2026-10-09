@@ -1,34 +1,37 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { OperatorHeader }       from '../../operator/OperatorHeader';
 import { OperatorSidebar }      from '../../operator/OperatorSidebar';
-import { IncidentTable }        from '../../operator/IncidentTable';
+import { IncidentTable, IncidentCardList } from '../../operator/IncidentTable';
 import { OperatorMap }          from '../../operator/OperatorMap';
 import { IncidentDetailDrawer } from '../../operator/IncidentDetailDrawer';
-import type { Incident, Filters, Unit } from '../../operator/types';
+import type { Incident, Filters } from '../../operator/types';
 import { Button }  from '../../ui/button';
-import { RefreshCw, AlertTriangle } from 'lucide-react';
+import { RefreshCw, AlertTriangle, SlidersHorizontal, List, Map as MapIcon } from 'lucide-react';
 import { toast }   from 'sonner';
 import { supabase } from '../../../utils/supabase/client';
 import {
   getAllIncidents,
   filterIncidents,
-  getAvailableUnits,
 } from '../../../services/incidentService';
 
 interface OperatorDashboardProps {
   onNavigateToSettings: () => void;
   onLogout:             () => void;
   accessToken?:         string;
+  /** Abrir este incidente (al tocar una notificación). */
+  abrirIncidenteId?:    string | null;
+  onIncidenteAbierto?:  () => void;
 }
 
 export function OperatorDashboard({
   onNavigateToSettings,
   onLogout,
+  abrirIncidenteId,
+  onIncidenteAbierto,
 }: OperatorDashboardProps) {
 
   // ── Estado principal ──────────────────────────────────────────
   const [incidents,        setIncidents]        = useState<Incident[]>([]);
-  const [units]                                  = useState<Unit[]>(getAvailableUnits());
   const [filters,          setFilters]          = useState<Filters>({});
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   const [loading,          setLoading]          = useState(true);
@@ -39,8 +42,10 @@ export function OperatorDashboard({
   const [operatorName, setOperatorName] = useState('Operador');
   const [operatorRole, setOperatorRole] = useState('operator');
 
-  // ── Búsqueda ──────────────────────────────────────────────────
+  // ── Búsqueda y vista en celular ───────────────────────────────
   const [searchQuery, setSearchQuery] = useState('');
+  const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
+  const [vistaMovil, setVistaMovil] = useState<'lista' | 'mapa'>('lista');
 
   // Ref estable para el snapshot de IDs actuales (para detectar nuevos)
   const knownIdsRef = useRef<Set<string>>(new Set());
@@ -146,6 +151,15 @@ export function OperatorDashboard({
     return () => { supabase.removeChannel(channel); };
   }, [loadIncidents]);
 
+  // ── Abrir el incidente de una notificación ────────────────────
+  useEffect(() => {
+    if (!abrirIncidenteId || incidents.length === 0) return;
+    const inc = incidents.find(i => i.id === abrirIncidenteId);
+    if (inc) setSelectedIncident(inc);
+    else toast.info('Ese incidente ya no está activo');
+    onIncidenteAbierto?.();
+  }, [abrirIncidenteId, incidents]);
+
   // ── Aplicar filtros + búsqueda ────────────────────────────────
   const filteredIncidents = (() => {
     let result = filterIncidents(incidents, filters);
@@ -182,9 +196,13 @@ export function OperatorDashboard({
     }
   };
 
+  const filtrosActivos = Object.values(filters).filter(v => v !== undefined && v !== false).length;
+  const resumen = loading ? 'Cargando…' : `${filteredIncidents.length} incidente${filteredIncidents.length !== 1 ? 's' : ''}${
+    filtrosActivos || searchQuery ? ' (filtrados)' : ''} · ${lastUpdate.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}`;
+
   // ── Render ────────────────────────────────────────────────────
   return (
-    <div className="h-screen flex flex-col bg-gray-50 overflow-hidden">
+    <div className="h-full flex flex-col bg-gray-50 overflow-hidden">
 
       <OperatorHeader
         newIncidentCount={newCount}
@@ -198,79 +216,104 @@ export function OperatorDashboard({
 
       <div className="flex-1 flex overflow-hidden min-h-0">
 
-        <OperatorSidebar
-          filters={filters}
-          onFiltersChange={setFilters}
-          onClearFilters={() => setFilters({})}
-        />
+        {/* Filtros: columna fija en pantallas grandes */}
+        <div className="hidden lg:flex">
+          <OperatorSidebar filters={filters} onFiltersChange={setFilters} onClearFilters={() => setFilters({})} />
+        </div>
 
-        <main className="flex-1 overflow-auto p-6 space-y-6">
+        <main className="flex-1 overflow-auto p-3 sm:p-4 lg:p-6 space-y-4 lg:space-y-6 min-w-0">
 
-          {/* Barra de acciones */}
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-gray-900">Incidentes Activos</h2>
-              <p className="text-sm text-gray-500 mt-0.5">
-                {loading ? 'Cargando...' : (
-                  <>
-                    <span className="font-medium text-gray-700">{filteredIncidents.length}</span>
-                    {' '}incidente{filteredIncidents.length !== 1 ? 's' : ''}
-                    {Object.keys(filters).length > 0 || searchQuery ? ' (filtrados)' : ''}
-                    {' · '}Actualizado {lastUpdate.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}
-                  </>
-                )}
-              </p>
+          {/* Encabezado + acciones */}
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <h2 className="text-base sm:text-lg font-semibold text-gray-900">Incidentes activos</h2>
+              <p className="text-xs sm:text-sm text-gray-500 mt-0.5 truncate">{resumen}</p>
             </div>
-            <Button
-              onClick={() => loadIncidents(true)}
-              variant="outline"
-              size="sm"
-              disabled={loading}
-            >
-              <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-              Actualizar
-            </Button>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <Button
+                onClick={() => setFiltrosAbiertos(true)}
+                variant="outline" size="sm"
+                className="lg:hidden h-9"
+                aria-label="Filtros"
+              >
+                <SlidersHorizontal className="w-4 h-4 sm:mr-1.5" />
+                <span className="hidden sm:inline">Filtros</span>
+                {filtrosActivos > 0 && (
+                  <span className="ml-1 bg-blue-600 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center">{filtrosActivos}</span>
+                )}
+              </Button>
+              <Button onClick={() => loadIncidents(true)} variant="outline" size="sm" disabled={loading} className="h-9" aria-label="Actualizar">
+                <RefreshCw className={`w-4 h-4 sm:mr-2 ${loading ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">Actualizar</span>
+              </Button>
+            </div>
+          </div>
+
+          {/* Celular: Lista | Mapa */}
+          <div className="md:hidden grid grid-cols-2 bg-gray-200/70 rounded-xl p-1 text-sm font-medium" role="tablist">
+            {([['lista', 'Lista', List], ['mapa', 'Mapa', MapIcon]] as const).map(([v, label, Icono]) => (
+              <button
+                key={v}
+                role="tab"
+                aria-selected={vistaMovil === v}
+                onClick={() => setVistaMovil(v)}
+                className={`flex items-center justify-center gap-1.5 py-2 rounded-lg transition ${vistaMovil === v ? 'bg-white shadow text-gray-900' : 'text-gray-600'}`}
+              >
+                <Icono className="w-4 h-4" aria-hidden /> {label}
+              </button>
+            ))}
           </div>
 
           {/* Estado vacío */}
           {!loading && incidents.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-16 text-gray-400 bg-white rounded-xl border border-gray-200">
-              <AlertTriangle className="w-12 h-12 mb-3 opacity-20" />
+            <div className="flex flex-col items-center justify-center py-12 text-gray-400 bg-white rounded-xl border border-gray-200">
+              <AlertTriangle className="w-10 h-10 mb-3 opacity-20" />
               <p className="text-base font-medium text-gray-500">Sin incidentes activos</p>
               <p className="text-sm mt-1">No hay alertas abiertas en este momento</p>
             </div>
           )}
 
-          {/* Tabla */}
+          {/* Lista (celular: tarjetas; tablet/escritorio: tabla) */}
           {(loading || incidents.length > 0) && (
-            <IncidentTable
-              incidents={filteredIncidents}
-              selectedId={selectedIncident?.id}
-              onSelectIncident={handleSelectIncident}
-              loading={loading}
-            />
+            <div className={vistaMovil === 'lista' ? '' : 'hidden md:block'}>
+              <div className="md:hidden">
+                <IncidentCardList incidents={filteredIncidents} selectedId={selectedIncident?.id}
+                  onSelectIncident={handleSelectIncident} loading={loading} />
+              </div>
+              <div className="hidden md:block overflow-x-auto">
+                <IncidentTable incidents={filteredIncidents} selectedId={selectedIncident?.id}
+                  onSelectIncident={handleSelectIncident} loading={loading} />
+              </div>
+            </div>
           )}
 
           {/* Mapa */}
-          <div>
-            <h3 className="text-base font-semibold text-gray-900 mb-3">
-              Mapa de Incidentes
-            </h3>
-            <OperatorMap
-              incidents={filteredIncidents}
-              selectedId={selectedIncident?.id}
-              onSelectIncident={handleSelectIncident}
-            />
+          <div className={vistaMovil === 'mapa' ? '' : 'hidden md:block'}>
+            <h3 className="hidden md:block text-base font-semibold text-gray-900 mb-3">Mapa de incidentes</h3>
+            <OperatorMap incidents={filteredIncidents} selectedId={selectedIncident?.id} onSelectIncident={handleSelectIncident} />
           </div>
-
         </main>
       </div>
 
-      {/* Drawer de detalle */}
+      {/* Filtros en celular/tablet: hoja inferior */}
+      {filtrosAbiertos && (
+        <div className="lg:hidden fixed inset-0 z-40 flex flex-col bg-black/30" onClick={() => setFiltrosAbiertos(false)}>
+          <div className="mt-auto max-h-[85%] flex flex-col rounded-t-2xl overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
+            <OperatorSidebar
+              className="w-full flex-1 min-h-0"
+              filters={filters}
+              onFiltersChange={setFilters}
+              onClearFilters={() => setFilters({})}
+              onClose={() => setFiltrosAbiertos(false)}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Detalle del incidente */}
       {selectedIncident && (
         <IncidentDetailDrawer
           incident={selectedIncident}
-          units={units}
           onClose={() => setSelectedIncident(null)}
           onIncidentUpdate={handleIncidentUpdate}
         />

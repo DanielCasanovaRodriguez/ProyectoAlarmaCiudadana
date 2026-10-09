@@ -6,6 +6,7 @@ import { Switch }    from '../ui/switch';
 import { getEmergencyContacts, saveEmergencyContacts } from '../../services/profileService';
 import type { EmergencyContactInput } from '../../services/profileService';
 import { toast } from 'sonner';
+import { LINEAS_EMERGENCIA, normalizarTelefonoCO } from '../../config/colombia';
 
 interface LocalContact extends EmergencyContactInput {
   _localId: string;
@@ -13,13 +14,6 @@ interface LocalContact extends EmergencyContactInput {
 
 const RELATIONSHIPS = ['Familiar', 'Amigo', 'Vecino', 'Compañero de trabajo', 'Médico', 'Otro'];
 
-const EMERGENCY_NUMBERS = [
-  { label: 'Policía Nacional',       num: '123', color: 'bg-blue-100',   text: 'text-blue-700' },
-  { label: 'Bomberos',               num: '119', color: 'bg-red-100',    text: 'text-red-700'  },
-  { label: 'Cruz Roja / Ambulancia', num: '132', color: 'bg-green-100',  text: 'text-green-700'},
-  { label: 'Defensa Civil',          num: '144', color: 'bg-orange-100', text: 'text-orange-700'},
-  { label: 'Línea de Emergencias',   num: '112', color: 'bg-purple-100', text: 'text-purple-700'},
-];
 
 interface EmergencyContactScreenProps {
   onBack: () => void;
@@ -70,12 +64,24 @@ export function EmergencyContactScreen({ onBack }: EmergencyContactScreenProps) 
     return true;
   };
 
+  const [errorTel, setErrorTel] = useState<string | null>(null);
+
   const handleAdd = async () => {
     if (!newContact.name.trim() || !newContact.phone.trim()) return;
+    const telefono = normalizarTelefonoCO(newContact.phone);
+    if (!telefono) {
+      setErrorTel('Escribe un celular colombiano de 10 dígitos (300 123 4567) o un fijo con indicativo (601 234 5678).');
+      return;
+    }
+    if (contacts.some(c => c.phone.replace(/\D/g, '') === telefono.replace(/\D/g, ''))) {
+      setErrorTel('Ese número ya está en tus contactos.');
+      return;
+    }
+    setErrorTel(null);
     const formatted: LocalContact = {
       _localId:      `tmp_${Date.now()}`,
-      name:          newContact.name.trim(),
-      phone:         newContact.phone.trim().startsWith('+57') ? newContact.phone.trim() : `+57 ${newContact.phone.trim()}`,
+      name:          newContact.name.trim().slice(0, 80),
+      phone:         telefono,
       relation:      newContact.relation || 'Familiar',
       notificar_sos: newContact.notificar_sos,
     };
@@ -122,7 +128,7 @@ export function EmergencyContactScreen({ onBack }: EmergencyContactScreenProps) 
             <Phone className="w-8 h-8 text-white" />
           </div>
           <h1 className="text-xl font-bold text-white">Contactos de Emergencia</h1>
-          <p className="text-red-100 text-sm mt-1">Serán notificados automáticamente al activar SOS</p>
+          <p className="text-red-100 text-sm mt-1">Después de enviar una alerta podrás avisarles con un toque (SMS, WhatsApp o llamada)</p>
         </div>
       </div>
 
@@ -140,13 +146,17 @@ export function EmergencyContactScreen({ onBack }: EmergencyContactScreenProps) 
             </p>
           </div>
           <div className="divide-y divide-gray-100">
-            {EMERGENCY_NUMBERS.map(e => (
-              <div key={e.num} className="flex items-center justify-between px-4 py-3">
-                <span className="text-sm text-gray-700">{e.label}</span>
-                <span className={`text-base font-bold font-mono px-2.5 py-0.5 rounded-lg ${e.color} ${e.text}`}>
-                  {e.num}
+            {LINEAS_EMERGENCIA.map(e => (
+              <a key={e.numero} href={`tel:${e.numero}`} className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-gray-50">
+                <span className="min-w-0">
+                  <span className="block text-sm text-gray-800 font-medium">{e.nombre}</span>
+                  <span className="block text-xs text-gray-500">{e.uso}</span>
                 </span>
-              </div>
+                <span className={`flex items-center gap-1.5 text-base font-bold font-mono px-2.5 py-0.5 rounded-lg flex-shrink-0 ${
+                  e.numero === '123' ? 'bg-red-100 text-red-700' : 'bg-blue-50 text-blue-700'}`}>
+                  <Phone className="w-3.5 h-3.5" aria-hidden />{e.numero}
+                </span>
+              </a>
             ))}
           </div>
         </div>
@@ -254,11 +264,12 @@ export function EmergencyContactScreen({ onBack }: EmergencyContactScreenProps) 
                   <Input
                     placeholder="Teléfono *"
                     value={newContact.phone}
-                    onChange={e => setNewContact({ ...newContact, phone: e.target.value })}
+                    onChange={e => { setNewContact({ ...newContact, phone: e.target.value }); setErrorTel(null); }}
                     type="tel"
                     className="pl-9 bg-white border-blue-200"
                   />
                 </div>
+                {errorTel && <p className="text-xs text-red-600" role="alert">{errorTel}</p>}
                 <select
                   className="w-full p-2.5 border border-blue-200 rounded-md text-sm bg-white"
                   value={newContact.relation ?? 'Familiar'}
@@ -310,8 +321,9 @@ export function EmergencyContactScreen({ onBack }: EmergencyContactScreenProps) 
               <div>
                 <p className="text-xs font-semibold text-amber-800 mb-1">Aviso de privacidad</p>
                 <p className="text-xs text-amber-700 leading-relaxed">
-                  Al agregar contactos autorizas el envío de avisos automáticos al activar una alerta SOS,
-                  conforme a la Ley 1273 de 2009.
+                  Al agregar a una persona declaras que te autorizó a registrar su nombre y teléfono para avisarle en
+                  caso de emergencia (Ley 1581 de 2012). Solo tú puedes ver tus contactos y nunca se les escribe sin tu
+                  acción. Las líneas de atención son gratuitas desde celular y fijo.
                 </p>
               </div>
             </div>

@@ -1,285 +1,148 @@
-import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Mail, AlertCircle, Info, RefreshCw } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ArrowLeft, KeyRound, AlertCircle, Loader2 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { AuthInput } from '../auth/AuthInput';
 import { sendPasswordResetOTP } from '../../services/authService';
 import { toast } from 'sonner';
-import { checkRateLimit, clearRateLimit } from '../../utils/rateLimitManager';
+import { validarNumeroCedula, soloDigitosCedula } from '../../utils/cedula';
+import { esperaRestante, tiempoDesdeEnvio, VIGENCIA_REUTILIZABLE_MS } from '../../utils/envioCodigos';
 
 interface ForgotPasswordScreenProps {
   onBack: () => void;
-  onCodeSent: (email: string) => void;
+  /** Correo o cédula con que se pidió el código (pasa a la pantalla del código). */
+  onCodeSent: (identificador: string) => void;
 }
 
+const esCorreoValido = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+
+/**
+ * Recuperar la contraseña con cédula o correo. La espera entre envíos la
+ * marca Supabase (la app muestra el tiempo exacto); si ya se envió un código
+ * hace poco, se puede ir directo a escribirlo.
+ */
 export function ForgotPasswordScreen({ onBack, onCodeSent }: ForgotPasswordScreenProps) {
-  const [email, setEmail] = useState('');
-  const [error, setError] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [cooldownRemaining, setCooldownRemaining] = useState(0);
-  const [isRateLimited, setIsRateLimited] = useState(false);
-  const [rateLimitMessage, setRateLimitMessage] = useState('');
-  const [showRateLimitHelp, setShowRateLimitHelp] = useState(false);
-  
-  const COOLDOWN_SECONDS = 60; // 60 segundos entre intentos
-
-  // Verificar rate limit al montar
-  useEffect(() => {
-    const status = checkRateLimit();
-    if (status.isBlocked) {
-      setIsRateLimited(true);
-      setRateLimitMessage(status.message);
-      setShowRateLimitHelp(true);
-    }
-  }, []);
+  const [valor, setValor]       = useState('');
+  const [error, setError]       = useState('');
+  const [info, setInfo]         = useState('');
+  const [enviando, setEnviando] = useState(false);
+  const [espera, setEspera]     = useState(0);
 
   useEffect(() => {
-    // Cooldown timer
-    if (cooldownRemaining > 0) {
-      const timer = setTimeout(() => setCooldownRemaining(cooldownRemaining - 1), 1000);
-      return () => clearTimeout(timer);
+    if (espera <= 0) return;
+    const t = setTimeout(() => setEspera(s => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [espera]);
+
+  /** Valida y devuelve el identificador normalizado (correo en minúsculas o cédula en dígitos). */
+  const identificador = (): string | null => {
+    const v = valor.trim();
+    if (!v) { setError('Ingresa tu número de cédula o tu correo'); return null; }
+    if (v.includes('@')) {
+      if (!esCorreoValido(v)) { setError('Ingresa un correo válido'); return null; }
+      return v.toLowerCase();
     }
-  }, [cooldownRemaining]);
-
-  // Actualizar mensaje de rate limit cada segundo
-  useEffect(() => {
-    if (isRateLimited) {
-      const interval = setInterval(() => {
-        const status = checkRateLimit();
-        if (!status.isBlocked) {
-          setIsRateLimited(false);
-          setShowRateLimitHelp(false);
-          setRateLimitMessage('');
-        } else {
-          setRateLimitMessage(status.message);
-        }
-      }, 1000);
-
-      return () => clearInterval(interval);
-    }
-  }, [isRateLimited]);
-
-  const isEmailValid = (email: string) => {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
+    const e = /[a-z]/i.test(v) ? 'Escribe tu número de cédula (solo números) o tu correo completo.' : validarNumeroCedula(v);
+    if (e) { setError(e); return null; }
+    return soloDigitosCedula(v);
   };
 
-  const canSubmit = email.length > 0 && cooldownRemaining === 0 && !isLoading && !isRateLimited;
-
-  const handleClearRateLimit = () => {
-    clearRateLimit();
-    setIsRateLimited(false);
-    setShowRateLimitHelp(false);
-    setRateLimitMessage('');
+  const enviar = async () => {
     setError('');
-    
-    toast.success('Bloqueo eliminado', {
-      description: 'Ahora puedes intentar enviar el código nuevamente. Por favor espera al menos 1 minuto entre intentos.'
-    });
-  };
+    setInfo('');
+    const id = identificador();
+    if (!id) return;
 
-  const handleSubmit = async () => {
-    setError('');
-    
-    if (!email) {
-      setError('Ingresa tu correo electrónico');
-      return;
-    }
-    
-    if (!isEmailValid(email)) {
-      setError('Ingresa un correo válido');
-      return;
-    }
-    
-    if (cooldownRemaining > 0) {
-      setError(`Por favor espera ${cooldownRemaining} segundos antes de intentar de nuevo`);
-      return;
-    }
+    const restante = esperaRestante(id);
+    if (restante > 0) { setEspera(restante); setInfo('Ya te enviamos un código hace un momento. Puedes escribirlo o esperar para pedir otro.'); return; }
 
-    if (isRateLimited) {
-      setError('Límite de intentos alcanzado. Usa el botón "Eliminar bloqueo" para reintentar.');
-      return;
-    }
-    
-    setIsLoading(true);
-    
+    setEnviando(true);
     try {
-      console.log('📧 Enviando código de recuperación a:', email);
-      
-      const result = await sendPasswordResetOTP(email);
-      
-      if (result.success) {
-        console.log('✅ Código enviado exitosamente');
-        
+      const r = await sendPasswordResetOTP(id);
+      if (r.success) {
         toast.success('Código enviado', {
-          description: 'Revisa tu correo electrónico (incluye carpeta de spam)'
+          description: id.includes('@')
+            ? 'Revisa tu correo (también la carpeta de spam).'
+            : 'Si la cédula está registrada, lo enviamos al correo de la cuenta.',
         });
-        
-        setCooldownRemaining(COOLDOWN_SECONDS);
-        onCodeSent(email);
+        onCodeSent(id);
+      } else if (r.esperaS) {
+        setEspera(r.esperaS);
+        setInfo(r.error ?? '');
       } else {
-        console.error('❌ Error al enviar código:', result.error);
-        
-        // Mejorar mensajes de error específicos
-        if (result.error?.includes('no existe') || 
-            result.error?.includes('not found') || 
-            result.error?.includes('No existe una cuenta')) {
-          setError('Este correo no está registrado. Por favor regístrate primero o verifica el correo.');
-          toast.error('Correo no registrado', {
-            description: 'No existe una cuenta con este correo. ¿Quieres registrarte?'
-          });
-        } else if (result.error?.includes('rate limit') || result.error?.includes('demasiados códigos')) {
-          setError('Has enviado demasiados códigos. Espera 15 minutos o usa el botón "Eliminar bloqueo".');
-          setIsRateLimited(true);
-          setRateLimitMessage('Límite de intentos alcanzado de Supabase (espera 15 minutos)');
-          setShowRateLimitHelp(true);
-        } else {
-          setError(result.error || 'Error al enviar código');
-        }
+        setError(r.error || 'No se pudo enviar el código. Intenta de nuevo.');
       }
-    } catch (err: any) {
-      console.error('❌ Error inesperado:', err);
-      setError('Error al enviar código. Intenta de nuevo.');
     } finally {
-      setIsLoading(false);
+      setEnviando(false);
     }
   };
+
+  const idActual = valor.trim().includes('@') ? valor.trim().toLowerCase() : soloDigitosCedula(valor.trim());
+  const hace = idActual ? tiempoDesdeEnvio(idActual) : null;
+  const yaTieneCodigo = hace != null && hace < VIGENCIA_REUTILIZABLE_MS;
 
   return (
     <div className="h-full bg-white flex flex-col">
-      {/* Header */}
-      <div className="flex items-center gap-4 px-6 py-4 border-b">
-        <button onClick={onBack} className="p-2 -ml-2 hover:bg-gray-100 rounded-full">
-          <ArrowLeft className="w-6 h-6 text-gray-700" />
+      <div className="flex items-center gap-3 px-4 py-3 border-b flex-shrink-0">
+        <button onClick={onBack} className="p-2 -ml-1 hover:bg-gray-100 rounded-full" aria-label="Volver">
+          <ArrowLeft className="w-5 h-5 text-gray-700" />
         </button>
-        <h1 className="text-gray-900">Recuperar contraseña</h1>
+        <h1 className="text-base font-semibold text-gray-900">Recuperar contraseña</h1>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto px-6 py-8">
-        <div className="max-w-md mx-auto space-y-6">
-          {/* Icon */}
-          <div className="flex justify-center mb-6">
-            <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center">
-              <Mail className="w-10 h-10 text-blue-600" />
+      <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-6">
+        <div className="max-w-md mx-auto space-y-5">
+          <div className="flex flex-col items-center text-center gap-3">
+            <div className="w-14 h-14 bg-blue-100 rounded-full flex items-center justify-center">
+              <KeyRound className="w-7 h-7 text-blue-600" aria-hidden />
+            </div>
+            <div>
+              <h2 className="text-gray-900 font-semibold">¿Olvidaste tu contraseña?</h2>
+              <p className="text-sm text-gray-600 mt-1">
+                Escribe tu número de cédula o tu correo y te enviaremos un código al correo de tu cuenta.
+              </p>
             </div>
           </div>
 
-          {/* Instructions */}
-          <div className="text-center mb-8">
-            <h2 className="text-gray-900 mb-2">¿Olvidaste tu contraseña?</h2>
-            <p className="text-gray-600">
-              Ingresa tu correo electrónico y te enviaremos un código para restablecer tu contraseña
-            </p>
-          </div>
+          <AuthInput
+            label="Cédula o correo electrónico"
+            value={valor}
+            onChange={(v) => { setValor(v); setError(''); setInfo(''); }}
+            placeholder="1012345678 o tu@correo.com"
+            error={error}
+            required
+            autoComplete="username"
+          />
 
-          {/* Rate Limit Help - NUEVO */}
-          {showRateLimitHelp && (
-            <div className="space-y-4">
-              <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-lg">
-                <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-red-900 mb-2">
-                    ⚠️ Límite de intentos alcanzado
-                  </p>
-                  <p className="text-sm text-red-800 mb-3">
-                    {rateLimitMessage}
-                  </p>
-                  <div className="text-sm text-red-800 space-y-1">
-                    <p className="font-medium">¿Qué puedes hacer?</p>
-                    <ul className="list-disc list-inside space-y-1 ml-2">
-                      <li>Espera 15-20 minutos antes de intentar de nuevo</li>
-                      <li>Revisa tu correo - puede que ya tengas un código válido</li>
-                      <li>Verifica tu carpeta de SPAM</li>
-                      <li>Si ya pasaron varios minutos, usa el botón de abajo</li>
-                    </ul>
-                  </div>
-                </div>
-              </div>
-
-              {/* Clear Rate Limit Button */}
-              <Button
-                onClick={handleClearRateLimit}
-                variant="outline"
-                className="w-full border-red-300 text-red-700 hover:bg-red-50"
-              >
-                <RefreshCw className="w-4 h-4 mr-2" />
-                Eliminar bloqueo y reintentar
-              </Button>
-
-              <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                <Info className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
-                <p className="text-xs text-amber-800">
-                  <strong>Nota:</strong> Este bloqueo es por seguridad. Si eliminas el bloqueo, asegúrate de esperar al menos 1 minuto entre intentos para evitar que Supabase bloquee tu cuenta temporalmente.
-                </p>
-              </div>
+          {info && (
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-900" role="status">{info}</div>
+          )}
+          {error && !valor && (
+            <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg" role="alert">
+              <AlertCircle className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" aria-hidden />
+              <p className="text-sm text-red-800">{error}</p>
             </div>
           )}
 
-          {/* Info box */}
-          {!showRateLimitHelp && (
-            <div className="flex items-start gap-3 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <Info className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
-              <div className="text-sm text-blue-800">
-                <p className="font-medium mb-1">📧 Importante:</p>
-                <ul className="space-y-1">
-                  <li>• Revisa tu bandeja de entrada y <strong>spam</strong></li>
-                  <li>• El código es válido por tiempo limitado</li>
-                  <li>• Solo puedes solicitar 1 código por minuto</li>
-                  <li>• Máximo 3-4 intentos por hora</li>
-                </ul>
-              </div>
-            </div>
-          )}
+          <Button
+            onClick={enviar}
+            disabled={enviando || espera > 0 || !valor.trim()}
+            className="w-full h-12 bg-blue-600 hover:bg-blue-700 text-white disabled:bg-gray-300 disabled:text-gray-500"
+          >
+            {enviando ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Enviando…</>
+              : espera > 0 ? <>Puedes pedir otro en <span className="tabular-nums ml-1">{espera} s</span></>
+              : 'Enviar código'}
+          </Button>
 
-          {/* Form */}
-          <div className="space-y-6">
-            <AuthInput
-              type="email"
-              label="Correo electrónico"
-              value={email}
-              onChange={setEmail}
-              placeholder="tu@email.com"
-              error={error}
-              required
-              disabled={isRateLimited}
-            />
-
-            {/* Cooldown warning */}
-            {cooldownRemaining > 0 && (
-              <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-lg">
-                <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
-                <p className="text-sm text-amber-800">
-                  Por seguridad, espera <strong>{cooldownRemaining} segundos</strong> antes de solicitar otro código.
-                </p>
-              </div>
-            )}
-
-            {/* Submit button */}
-            <Button
-              onClick={handleSubmit}
-              disabled={!canSubmit}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white disabled:bg-gray-300 disabled:text-gray-500"
-              size="lg"
-            >
-              {isLoading 
-                ? 'Enviando código...' 
-                : isRateLimited
-                  ? 'Bloqueado - Usa el botón de arriba'
-                  : cooldownRemaining > 0 
-                    ? `Espera ${cooldownRemaining}s...` 
-                    : 'Enviar código'}
-            </Button>
-          </div>
-
-          {/* Back to login */}
-          <div className="text-center pt-4">
-            <button
-              onClick={onBack}
-              className="text-blue-600 hover:text-blue-700"
-            >
-              Volver al inicio de sesión
+          {yaTieneCodigo && (
+            <button onClick={() => onCodeSent(idActual)} className="w-full text-sm text-blue-600 font-medium py-1">
+              Ya tengo un código: escribirlo
             </button>
-          </div>
+          )}
+
+          <ul className="text-xs text-gray-500 bg-gray-50 rounded-lg p-3 space-y-1">
+            <li>• Revisa también <strong>Spam / Correo no deseado</strong>.</li>
+            <li>• Puedes pedir un código nuevo cada 30 segundos; usa siempre el más reciente.</li>
+          </ul>
         </div>
       </div>
     </div>

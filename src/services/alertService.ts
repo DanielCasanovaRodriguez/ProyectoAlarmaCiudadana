@@ -1,6 +1,6 @@
 import { supabase } from '../utils/supabase/client';
 import { toAppError } from '../utils/errors';
-import type { Database } from '../types/database.types';
+import type { Database, AlertaCercanaRow } from '../types/database.types';
 import { isMissingRpc } from './rpc';
 
 // ================================================================
@@ -118,7 +118,32 @@ export async function updateAlertMediaUrls(
 }
 
 // ================================================================
-// CU-010 — Alertas activas para el mapa (todas, no solo las propias)
+// Proximidad real (pasos 13-14): "cerca de ti" es lo que está a ≤ 1 km
+// ================================================================
+
+/** Radio de las alertas "cerca de ti" (1 km). */
+export const RADIO_CERCANIA_M = 1000;
+
+/** Alertas activas a ≤ 1 km de un punto, ordenadas por distancia (la calcula la BD). */
+export async function getAlertasCercanas(lat: number, lng: number): Promise<AlertaCercanaRow[]> {
+  const { data, error } = await supabase.rpc('alertas_cercanas', { p_lat: lat, p_lng: lng, p_radio_m: RADIO_CERCANIA_M });
+  if (error) throw toAppError(error, 'No se pudieron cargar las alertas cercanas.');
+  return (data ?? []) as AlertaCercanaRow[];
+}
+
+export interface AreaMapa { sur: number; oeste: number; norte: number; este: number }
+
+/** Exploración manual: alertas activas dentro del área visible del mapa. */
+export async function getAlertasEnArea(a: AreaMapa): Promise<AlertaCercanaRow[]> {
+  const { data, error } = await supabase.rpc('alertas_en_area', {
+    p_sur: a.sur, p_oeste: a.oeste, p_norte: a.norte, p_este: a.este,
+  });
+  if (error) throw toAppError(error, 'No se pudieron cargar las alertas de esta zona.');
+  return (data ?? []) as AlertaCercanaRow[];
+}
+
+// ================================================================
+// CU-010 — Alertas activas (anterior; el servidor ya la limita a 1 km)
 // ================================================================
 
 export async function getActiveAlerts(): Promise<Alert[]> {

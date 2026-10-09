@@ -36,7 +36,7 @@ export function AdminConfigScreen({ accessToken }: AdminConfigScreenProps) {
 
   if (loading) {
     return (
-      <div className="p-6 space-y-6">
+      <div className="p-3 sm:p-6 space-y-4 sm:space-y-6">
         <Skeleton className="h-48 w-full" />
         <Skeleton className="h-48 w-full" />
       </div>
@@ -44,7 +44,7 @@ export function AdminConfigScreen({ accessToken }: AdminConfigScreenProps) {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6">
 
       {/* Información del sistema */}
       <Card>

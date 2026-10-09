@@ -11,8 +11,12 @@ interface AuthCheckboxProps {
 export function AuthCheckbox({ checked, onChange, label, error }: AuthCheckboxProps) {
   return (
     <div className="w-full">
-      <label className="flex items-start gap-3 cursor-pointer group">
-        <div
+      <div className="flex items-start gap-3 cursor-pointer group">
+        <button
+          type="button"
+          role="checkbox"
+          aria-checked={checked}
+          aria-invalid={!!error}
           onClick={() => onChange(!checked)}
           className={`min-w-[24px] w-6 h-6 rounded border-2 flex items-center justify-center transition-all ${
             checked
@@ -23,9 +27,9 @@ export function AuthCheckbox({ checked, onChange, label, error }: AuthCheckboxPr
           }`}
         >
           {checked && <Check className="w-4 h-4 text-white" />}
-        </div>
-        <span className="text-sm text-gray-700 flex-1 -mt-0.5">{label}</span>
-      </label>
+        </button>
+        <span className="text-sm text-gray-700 flex-1 -mt-0.5" onClick={() => onChange(!checked)}>{label}</span>
+      </div>
       {error && (
         <p className="mt-1 ml-9 text-sm text-red-600">{error}</p>
       )}

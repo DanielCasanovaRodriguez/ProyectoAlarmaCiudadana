@@ -416,3 +416,6 @@ enabled = true
 
 [functions.notificar-alerta]
 verify_jwt = false
+
+[functions.acceso-cedula]
+verify_jwt = true

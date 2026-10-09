@@ -146,3 +146,64 @@ export function IncidentTable({
     </div>
   );
 }
+
+/**
+ * Versión para celular: tarjetas en lugar de la tabla de 9 columnas.
+ * Lo urgente primero a la vista: tipo, estado, severidad, hora y tiempo restante.
+ */
+export function IncidentCardList({ incidents, selectedId, onSelectIncident, loading = false }: IncidentTableProps) {
+  if (loading) {
+    return (
+      <div className="space-y-2">
+        {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-20 w-full rounded-xl" />)}
+      </div>
+    );
+  }
+  if (incidents.length === 0) {
+    return (
+      <p className="text-center text-gray-500 text-sm py-10 bg-white rounded-xl border border-gray-200">
+        No hay incidentes que coincidan con los filtros
+      </p>
+    );
+  }
+  return (
+    <ul className="space-y-2">
+      {incidents.map(incident => {
+        const isSelected = selectedId === incident.id;
+        const isOverdue  = incident.slaMinutesLeft < 5 && incident.status !== 'resolved';
+        return (
+          <li key={incident.id}>
+            <button
+              onClick={() => onSelectIncident(incident)}
+              className={`w-full text-left rounded-xl border p-3 shadow-sm active:scale-[0.99] transition ${
+                isSelected ? 'border-blue-400 bg-blue-50' : isOverdue ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-white'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate">{incident.typeLabel}</p>
+                  <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
+                    <Clock className="w-3 h-3" aria-hidden /> {incident.time} · {incident.source}
+                    {incident.unitName ? ` · ${incident.unitName}` : ''}
+                  </p>
+                </div>
+                <StatusBadge status={incident.status} />
+              </div>
+              {incident.description && incident.description !== 'Sin descripción' && (
+                <p className="text-xs text-gray-600 mt-2 line-clamp-2 break-words">{incident.description}</p>
+              )}
+              <div className="flex items-center justify-between mt-2">
+                <SeverityChip severity={incident.severity} />
+                {incident.status !== 'resolved' && (
+                  <span className={`text-xs font-medium ${isOverdue ? 'text-red-600' : 'text-gray-500'}`}>
+                    {incident.slaMinutesLeft > 0 ? `Quedan ${incident.slaMinutesLeft} min` : 'Tiempo vencido'}
+                  </span>
+                )}
+              </div>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}

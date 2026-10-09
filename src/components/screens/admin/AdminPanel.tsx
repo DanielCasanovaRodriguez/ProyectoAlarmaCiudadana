@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { AdminVerificationsScreen } from './AdminVerificationsScreen';
+import { AdminCedulasScreen } from './AdminCedulasScreen';
+import { AdminSolicitudesScreen } from './AdminSolicitudesScreen';
 import { AdminSidebar }       from '../../admin/AdminSidebar';
 import { AdminHeader }        from '../../admin/AdminHeader';
 import { AdminProfileDialog } from '../../admin/AdminProfileDialog';
@@ -47,6 +48,7 @@ export function AdminPanel({ onLogout }: AdminPanelProps = {}) {
   const [authenticated,   setAuthenticated]   = useState(false);
   const [user,            setUser]            = useState<any>(null);
   const [profile,         setProfile]         = useState<any>(null);
+  const [menuAbierto,     setMenuAbierto]     = useState(false);
   const [accessToken,     setAccessToken]     = useState('');
   const [currentSection,  setCurrentSection]  = useState('overview');
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
@@ -147,7 +149,8 @@ export function AdminPanel({ onLogout }: AdminPanelProps = {}) {
     reports:  'Reportes y Análisis',
     health:   'Salud del Sistema',
     config:   'Configuración del Sistema',
-    identidad: 'Verificación de identidad',
+    identidad: 'Cédulas registradas',
+    solicitudes: 'Solicitudes de titulares (habeas data)',
   };
 
   // ── Render de sección activa ────────────────────────────────────
@@ -160,7 +163,8 @@ export function AdminPanel({ onLogout }: AdminPanelProps = {}) {
       case 'reports':  return <AdminReportsScreen  accessToken={accessToken} />;
       case 'health':   return <AdminHealthScreen   accessToken={accessToken} />;
       case 'config':   return <AdminConfigScreen   accessToken={accessToken} />;
-      case 'identidad': return <AdminVerificationsScreen puedeRevisar={profile?.role === 'admin'} />;
+      case 'identidad': return <AdminCedulasScreen esAdmin={profile?.role === 'admin'} />;
+      case 'solicitudes': return <AdminSolicitudesScreen esAdmin={profile?.role === 'admin'} />;
       default:         return <AdminOverviewScreen accessToken={accessToken} />;
     }
   };
@@ -168,7 +172,7 @@ export function AdminPanel({ onLogout }: AdminPanelProps = {}) {
   // ── Pantalla de carga inicial ───────────────────────────────────
   if (initializing) {
     return (
-      <div className="flex h-screen bg-gray-50 items-center justify-center">
+      <div className="flex h-full bg-gray-50 items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <Loader2 className="w-8 h-8 animate-spin text-red-600" />
           <p className="text-sm text-gray-500">Verificando sesión...</p>
@@ -186,7 +190,7 @@ export function AdminPanel({ onLogout }: AdminPanelProps = {}) {
       onLogout();
     }
     return (
-      <div className="flex h-screen bg-gray-50 items-center justify-center">
+      <div className="flex h-full bg-gray-50 items-center justify-center">
         <div className="text-center">
           <p className="text-gray-600 mb-2">Sesión no válida.</p>
           <p className="text-sm text-gray-400">Redirigiendo al login...</p>
@@ -197,14 +201,30 @@ export function AdminPanel({ onLogout }: AdminPanelProps = {}) {
 
   // ── Panel principal ─────────────────────────────────────────────
   return (
-    <div className="flex h-screen bg-gray-50 overflow-hidden">
+    <div className="flex h-full bg-gray-50 overflow-hidden">
 
-      {/* Sidebar */}
-      <AdminSidebar
-        currentSection={currentSection}
-        onSectionChange={setCurrentSection}
-        userRole={profile?.role ?? 'admin'}
-      />
+      {/* Menú: columna fija en pantallas grandes */}
+      <div className="hidden lg:flex">
+        <AdminSidebar
+          currentSection={currentSection}
+          onSectionChange={setCurrentSection}
+          userRole={profile?.role ?? 'admin'}
+        />
+      </div>
+
+      {/* Menú en celular/tablet: cajón */}
+      {menuAbierto && (
+        <div className="lg:hidden fixed inset-0 z-40 flex" role="dialog" aria-label="Menú">
+          <AdminSidebar
+            movil
+            currentSection={currentSection}
+            onSectionChange={setCurrentSection}
+            userRole={profile?.role ?? 'admin'}
+            onClose={() => setMenuAbierto(false)}
+          />
+          <div className="flex-1 bg-black/40" onClick={() => setMenuAbierto(false)} aria-hidden />
+        </div>
+      )}
 
       {/* Contenido principal */}
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
@@ -217,6 +237,7 @@ export function AdminPanel({ onLogout }: AdminPanelProps = {}) {
           onLogout={handleLogout}
           onProfileClick={() => setProfileDialogOpen(true)}
           onSettingsClick={() => setCurrentSection('config')}
+          onMenuClick={() => setMenuAbierto(true)}
         />
 
         {/* Área de contenido */}

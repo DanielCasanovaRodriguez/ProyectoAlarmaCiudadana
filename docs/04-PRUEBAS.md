@@ -74,3 +74,57 @@ Las pruebas con inicio de sesión en el Supabase real necesitan credenciales, qu
 - [ ] Admin → *Verificación de identidad*: ver fotos y número, aprobar/rechazar (el rechazo exige motivo).
 - [ ] Modo avión: aviso “Sin conexión”, SOS deshabilitado con botón “Llamar al 123”; al volver la red, “Conexión restablecida”.
 - [ ] Dos celulares a < 1 km: reportar en uno → aviso en el otro (con la app abierta; con Firebase, también cerrada).
+
+## Versión 1.3.0 (2026-10-08): cédula por formulario, acceso con cédula, antiabuso y seguridad
+
+| Prueba | Resultado |
+|---|---|
+| `npm run test:db` (réplica de producción, migraciones 1–9) | ✅ 70/70 |
+| `npm run test:unit` (errores 20/20, validaciones de cédula y fecha 21/21) | ✅ |
+| Producción, transacción revertida: registro con cédula → guardada cifrada, eliminada de metadatos, perfil `citizen`; duplicado (con cero a la izquierda) rechazado | ✅ |
+| Producción, `acceso-cedula`: sin token 401; cédula inválida 400; inexistente 401 genérico; 6.º intento 429 (bloqueo 15 min); CORS no autoriza orígenes ajenos | ✅ |
+| Producción: BD → pg_net (ya en `extensions`) → notificar-alerta | ✅ 200 |
+| CSP de `vercel.json` servida localmente: la app carga, Supabase permitido, dominio ajeno bloqueado | ✅ |
+| APK 1.3.0 con R8 (3,7 MB) en emulador: arranca, plugins funcionan, selector de fecha nativo sin fechas futuras | ✅ |
+| Registro y acceso con una cédula y correo reales | ⏳ Responsable |
+| Push con la app cerrada | ⏳ Requiere Firebase |
+
+
+## Versión 1.4.0 (2026-10-08): interventoría
+
+| Prueba | Resultado |
+|---|---|
+| `npm run test:db` (migraciones 1–12) | ✅ 81/81 |
+| `npm run test:unit` (errores, cédula, interventoría: XSS, teléfonos, líneas de Colombia, contraseña) | ✅ 59/59 |
+| Datos de producción compatibles con las nuevas validaciones (23 alertas) | ✅ |
+| `acceso-cedula` recuperar y verificar con cédula inexistente: respuesta genérica | ✅ |
+| Navegador (375 px): bienvenida con 123 y documentos legales, ventana de la política, inicio de sesión con un campo y su validación | ✅ |
+
+
+## Versión 1.5.0 (2026-10-08): proximidad real 5 km
+
+| Prueba | Resultado |
+|---|---|
+| `npm run test:db` (migraciones 1–13; proximidad: 0,3 / 4,95 km sí, 5,05 km no; Medellín ≠ Bogotá; radio máximo; área explorada; función anterior) | ✅ 88/88 |
+| `npm run test:unit` | ✅ 59/59 |
+| Producción: desde Medellín 0 alertas; centro de Bogotá 22 (igual que una consulta PostGIS directa); distancia PostGIS 1 800 m vs Haversine 1 801 m | ✅ |
+| Navegador (400 px): círculo de 5 km, contador y lista por distancia, "Buscar alertas en esta zona" al alejarse, volver a mi ubicación, estado sin ubicación con vista de Colombia | ✅ |
+
+
+## Versión 1.6.0 (2026-10-08): notificaciones, 1 km y vigencia de 1 hora
+
+| Prueba | Resultado |
+|---|---|
+| `npm run test:db` (migraciones 1–15: 1 km por defecto, Bogotá visible explorando desde Montería sin contar como cercana, cierre a la hora sin borrar, historial con nota, permisos) | ✅ 93/93 |
+| `npm run test:unit` | ✅ 59/59 |
+| Producción: diagnóstico de Firebase OK; push de prueba enviado por FCM; pg_cron ejecutándose cada minuto (succeeded); 29 alertas conservadas | ✅ |
+| Navegador (400 px): mapa encuadrado en 1 km, contador y lista | ✅ |
+
+
+## Versión 1.7.0 (2026-10-08): perfiles de operador y administrador en el celular
+
+| Prueba | Resultado |
+|---|---|
+| `npm run test:db` (migraciones 1–16; mensaje del personal: llega solo al autor, ciudadanos no pueden enviarlo, longitud validada) | ✅ 94/94 |
+| `npm run test:unit` | ✅ 59/59 |
+| Navegador a 360 px: código de 8 casillas sin desbordar (328 px), filtra letras; filtros del operador en hoja inferior con listas visibles encima; detalle del incidente con unidad y mensaje reales; menú del administrador en cajón, encabezado de 56 px, sin desplazamiento horizontal | ✅ |

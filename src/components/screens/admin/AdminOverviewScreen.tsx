@@ -56,7 +56,7 @@ export function AdminOverviewScreen({ accessToken }: AdminOverviewScreenProps) {
   }, [accessToken]);
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6">
 
       {/* KPI Cards — row 1 */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

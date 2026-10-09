@@ -75,7 +75,7 @@ export function AdminAlertsScreen({ accessToken }: AdminAlertsScreenProps) {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6">
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
@@ -129,7 +129,25 @@ export function AdminAlertsScreen({ accessToken }: AdminAlertsScreenProps) {
               {[...Array(8)].map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}
             </div>
           ) : alerts.length > 0 ? (
-            <div className="overflow-x-auto">
+            <>
+            <ul className="md:hidden divide-y divide-gray-100 -mx-2">
+              {alerts.map(alert => (
+                <li key={alert.id}>
+                  <button onClick={() => setViewingAlert(alert)} className="w-full text-left px-2 py-3 flex items-start gap-3 active:bg-gray-50">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-medium text-gray-900 truncate">{getAlertTypeLabel(alert.type)}</p>
+                        <StatusBadge status={alert.status} />
+                      </div>
+                      {alert.description && <p className="text-xs text-gray-600 mt-1 line-clamp-2 break-words">{alert.description}</p>}
+                      <p className="text-xs text-gray-400 mt-1">{formatDate(alert.createdAt)} · {alert.id.slice(0, 8)}</p>
+                    </div>
+                    <Eye className="w-4 h-4 text-gray-400 mt-1 flex-shrink-0" aria-hidden />
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <div className="hidden md:block overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -181,6 +199,7 @@ export function AdminAlertsScreen({ accessToken }: AdminAlertsScreenProps) {
                 </TableBody>
               </Table>
             </div>
+            </>
           ) : (
             <EmptyState
               icon={AlertTriangle}

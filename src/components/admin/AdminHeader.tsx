@@ -1,4 +1,4 @@
-import { Search, Bell, LogOut, User, Settings } from 'lucide-react';
+import { Search, LogOut, User, Settings , Menu } from 'lucide-react';
 import { Input } from '../ui/input';
 import { Button } from '../ui/button';
 import {
@@ -19,9 +19,11 @@ interface AdminHeaderProps {
   onSearch?: (query: string) => void;
   onProfileClick?: () => void;
   onSettingsClick?: () => void;
+  /** Abre el menú lateral en el celular. */
+  onMenuClick?: () => void;
 }
 
-export function AdminHeader({ title, userName, userEmail, onLogout, onSearch, onProfileClick, onSettingsClick }: AdminHeaderProps) {
+export function AdminHeader({ title, userName, userEmail, onLogout, onSearch, onProfileClick, onSettingsClick, onMenuClick }: AdminHeaderProps) {
   const now = new Date();
   const formattedDate = now.toLocaleDateString('es-CO', { 
     weekday: 'long', 
@@ -42,20 +44,28 @@ export function AdminHeader({ title, userName, userEmail, onLogout, onSearch, on
     .slice(0, 2);
 
   return (
-    <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6">
-      {/* Left: Title and Date */}
-      <div>
-        <h1 className="text-xl font-semibold text-gray-900">{title}</h1>
-        <p className="text-xs text-gray-500 mt-0.5">
-          {formattedDate} • {formattedTime}
-        </p>
+    <header className="flex-shrink-0 min-h-14 sm:h-16 bg-white border-b border-gray-200 flex items-center justify-between gap-2 px-2 sm:px-6"
+      style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+      {/* Izquierda: menú (celular), título y fecha */}
+      <div className="flex items-center gap-1 min-w-0">
+        {onMenuClick && (
+          <Button variant="ghost" size="icon" onClick={onMenuClick} className="lg:hidden h-10 w-10 flex-shrink-0" aria-label="Abrir menú">
+            <Menu className="w-5 h-5" />
+          </Button>
+        )}
+        <div className="min-w-0">
+          <h1 className="text-base sm:text-xl font-semibold text-gray-900 truncate">{title}</h1>
+          <p className="hidden sm:block text-xs text-gray-500 mt-0.5">
+            {formattedDate} • {formattedTime}
+          </p>
+        </div>
       </div>
 
       {/* Right: Search, Notifications, Profile */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
         {/* Search */}
         {onSearch && (
-          <div className="relative w-80">
+          <div className="relative w-80 hidden md:block">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <Input
               type="text"
@@ -65,12 +75,6 @@ export function AdminHeader({ title, userName, userEmail, onLogout, onSearch, on
             />
           </div>
         )}
-
-        {/* Notifications */}
-        <Button variant="ghost" size="sm" className="relative h-9 w-9 p-0">
-          <Bell className="w-5 h-5 text-gray-600" />
-          <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
-        </Button>
 
         {/* Profile Dropdown */}
         <DropdownMenu>
